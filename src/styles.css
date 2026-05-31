@@ -315,6 +315,17 @@ input[type="checkbox"] {
   margin-top: 12px;
 }
 
+.message.success {
+  color: var(--green);
+  font-size: 20px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.message.error {
+  color: var(--rose);
+}
+
 .message.neutral {
   color: var(--muted);
 }
@@ -333,6 +344,132 @@ input[type="checkbox"] {
   max-height: calc(100vh - 150px);
   max-width: min(100%, 560px);
   width: auto;
+}
+
+.creator-shell {
+  background:
+    radial-gradient(circle at 50% 0%, rgba(15, 118, 110, 0.14), transparent 32%),
+    #f5f2ea;
+  min-height: 100vh;
+}
+
+.creator-topbar {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  padding: 28px clamp(22px, 5vw, 64px) 8px;
+}
+
+.creator-topbar h1 {
+  font-size: clamp(30px, 5vw, 56px);
+  letter-spacing: 0.04em;
+}
+
+.creator-topbar p {
+  color: var(--muted);
+  font-size: 16px;
+  margin-top: 8px;
+}
+
+.creator-logout {
+  align-items: center;
+  background: white;
+  border: 1px solid var(--line);
+  color: var(--ink);
+  display: inline-flex;
+  font-size: 20px;
+  gap: 10px;
+  padding: 18px 24px;
+}
+
+.creator-kiosk {
+  align-items: start;
+  gap: 28px;
+  grid-template-columns: 1fr;
+  min-height: calc(100vh - 120px);
+  padding: 20px clamp(22px, 5vw, 64px) 46px;
+}
+
+.creator-kiosk .composer {
+  order: 2;
+  width: 100%;
+}
+
+.creator-kiosk .preview-stage {
+  min-height: 42vh;
+  order: 1;
+}
+
+.creator-kiosk .tag-canvas {
+  max-height: 44vh;
+  max-width: min(92vw, 720px);
+}
+
+.creator-kiosk .section-title {
+  font-size: 28px;
+  justify-content: center;
+  margin-bottom: 24px;
+}
+
+.creator-kiosk .template-grid {
+  gap: 18px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-bottom: 28px;
+}
+
+.creator-kiosk .template-card {
+  gap: 14px;
+  min-height: clamp(190px, 20vh, 280px);
+  padding: 16px;
+  text-align: center;
+}
+
+.creator-kiosk .template-card img {
+  aspect-ratio: 1 / 1;
+  object-fit: contain;
+}
+
+.creator-kiosk .template-meta strong {
+  font-size: clamp(18px, 3vw, 28px);
+}
+
+.creator-kiosk .template-meta small {
+  font-size: 15px;
+}
+
+.creator-kiosk .field {
+  gap: 12px;
+}
+
+.creator-kiosk .field span {
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.creator-kiosk input {
+  font-size: clamp(34px, 7vw, 72px);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 24px;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.creator-kiosk .field-hint {
+  font-size: 18px;
+  text-align: center;
+}
+
+.creator-kiosk .primary-btn {
+  font-size: clamp(28px, 5vw, 48px);
+  gap: 16px;
+  margin-top: 28px;
+  min-height: 96px;
+}
+
+.creator-kiosk .primary-btn svg {
+  height: 36px;
+  width: 36px;
 }
 
 .admin-layout {
@@ -626,6 +763,10 @@ th {
   }
 
   .access-settings-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .creator-kiosk .template-grid {
     grid-template-columns: 1fr;
   }
 }

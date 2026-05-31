@@ -68,6 +68,8 @@ const defaultSettings = {
   currentNumber: "1",
   digits: "4",
   watermarkEnabled: "true",
+  creatorAutoPrint: "false",
+  creatorAutoReturn: "false",
   selectedPrinter: "",
   deploymentMode: "private",
   inviteCode: ""
@@ -181,6 +183,8 @@ async function getSettings() {
     currentNumber: Number(activeEvent.current_number),
     digits: Number(activeEvent.digits),
     watermarkEnabled: (settings.watermarkEnabled ?? defaultSettings.watermarkEnabled) === "true",
+    creatorAutoPrint: (settings.creatorAutoPrint ?? defaultSettings.creatorAutoPrint) === "true",
+    creatorAutoReturn: (settings.creatorAutoReturn ?? defaultSettings.creatorAutoReturn) === "true",
     selectedPrinter: settings.selectedPrinter ?? defaultSettings.selectedPrinter,
     deploymentMode: deploymentModes.includes(settings.deploymentMode)
       ? settings.deploymentMode
@@ -196,6 +200,8 @@ function toClientSettings(settings) {
     currentNumber: settings.currentNumber,
     digits: settings.digits,
     watermarkEnabled: settings.watermarkEnabled,
+    creatorAutoPrint: settings.creatorAutoPrint,
+    creatorAutoReturn: settings.creatorAutoReturn,
     deploymentMode: settings.deploymentMode,
     activeEvent: settings.activeEvent
   };
@@ -401,6 +407,15 @@ function toPublicOrder(order) {
     generated_at: order.generated_at,
     print_status: order.print_status
   };
+}
+
+function getOrderById(orderId) {
+  return db.prepare(`
+    SELECT orders.*, events.name AS event_name, events.event_date AS event_date
+    FROM orders
+    LEFT JOIN events ON events.id = orders.event_id
+    WHERE orders.id = ?
+  `).get(orderId);
 }
 
 function parseOrderIds(value) {
@@ -707,6 +722,8 @@ app.put("/api/settings", requireStaff, async (req, res) => {
   const currentNumber = Math.max(1, Number.parseInt(req.body.currentNumber, 10) || 1);
   const digits = Math.min(8, Math.max(1, Number.parseInt(req.body.digits, 10) || 4));
   const watermarkEnabled = Boolean(req.body.watermarkEnabled);
+  const creatorAutoPrint = Boolean(req.body.creatorAutoPrint);
+  const creatorAutoReturn = Boolean(req.body.creatorAutoReturn);
   const selectedPrinter = String(req.body.selectedPrinter ?? "").slice(0, 160);
   const deploymentMode = deploymentModes.includes(req.body.deploymentMode) ? req.body.deploymentMode : "private";
   const inviteCode = String(req.body.inviteCode ?? "").slice(0, 64);
@@ -721,6 +738,8 @@ app.put("/api/settings", requireStaff, async (req, res) => {
     getActiveEvent().id
   );
   db.prepare("UPDATE settings SET value = ? WHERE key = 'watermarkEnabled'").run(String(watermarkEnabled));
+  db.prepare("UPDATE settings SET value = ? WHERE key = 'creatorAutoPrint'").run(String(creatorAutoPrint));
+  db.prepare("UPDATE settings SET value = ? WHERE key = 'creatorAutoReturn'").run(String(creatorAutoReturn));
   db.prepare("UPDATE settings SET value = ? WHERE key = 'selectedPrinter'").run(selectedPrinter);
   db.prepare("UPDATE settings SET value = ? WHERE key = 'deploymentMode'").run(deploymentMode);
   db.prepare("UPDATE settings SET value = ? WHERE key = 'inviteCode'").run(inviteCode);
@@ -841,7 +860,15 @@ app.get("/api/orders/batch", requireStaff, async (req, res) => {
 });
 
 app.get("/api/orders/:id", requireStaff, async (req, res) => {
-  const order = db.prepare("SELECT * FROM orders WHERE id = ?").get(req.params.id);
+  const order = getOrderById(req.params.id);
+  if (!order) {
+    return res.status(404).json({ message: "Order not found" });
+  }
+  res.json(toPublicOrder(order));
+});
+
+app.get("/api/orders/:id/ticket", requireCustomerAccess, async (req, res) => {
+  const order = getOrderById(req.params.id);
   if (!order) {
     return res.status(404).json({ message: "Order not found" });
   }
@@ -887,7 +914,8 @@ app.post("/api/orders", requireCustomerAccess, async (req, res) => {
     db.prepare("UPDATE events SET current_number = ? WHERE id = ?").run(nextNumber, activeEvent.id);
     syncLegacyNumberSettings({ ...activeEvent, current_number: nextNumber });
     db.exec("COMMIT");
-    res.status(201).json({ orderNo, generatedAt });
+    const order = db.prepare("SELECT id FROM orders WHERE event_id = ? AND order_no = ? ORDER BY id DESC LIMIT 1").get(activeEvent.id, orderNo);
+    res.status(201).json({ id: order.id, orderNo, generatedAt });
   } catch (error) {
     try {
       db.exec("ROLLBACK");

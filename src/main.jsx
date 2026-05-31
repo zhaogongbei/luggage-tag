@@ -15,7 +15,7 @@ import {
 import "./styles.css";
 
 const API_BASE = import.meta.env.DEV ? `${window.location.protocol}//${window.location.hostname}:3001` : "";
-const APP_VERSION = "V1.4.5";
+const APP_VERSION = "V1.4.6";
 const deploymentModes = [
   { value: "private", label: "Private", description: "仅员工登录后可使用定制页和后台" },
   { value: "invite", label: "Invite", description: "邀请码可访问定制页，后台仍需员工登录" },
@@ -114,6 +114,10 @@ function normalizeCustomerName(value) {
   return chars.slice(0, hasChinese ? 6 : 12).join("");
 }
 
+function parseBooleanParam(value) {
+  return ["1", "true", "yes", "on"].includes(String(value ?? "").toLowerCase());
+}
+
 function drawCenteredText(ctx, text, x, y, font, color) {
   ctx.fillStyle = color;
   ctx.font = font;
@@ -122,7 +126,7 @@ function drawCenteredText(ctx, text, x, y, font, color) {
   ctx.fillText(text, x, y);
 }
 
-function drawTag(canvas, { template, customerText, orderNo, watermarkEnabled, timestamp, image }) {
+function drawTag(canvas, { template, customerText, orderNo, watermarkEnabled, timestamp, image, showMeta = true }) {
   const ctx = canvas.getContext("2d");
   const width = image?.naturalWidth || 900;
   const height = image?.naturalHeight || 560;
@@ -140,10 +144,12 @@ function drawTag(canvas, { template, customerText, orderNo, watermarkEnabled, ti
   const name = normalizeCustomerName(customerText) || "MARISSA";
   const centerX = width / 2;
   const ink = template.textColor;
-  drawCenteredText(ctx, orderNo, centerX, height * 0.62, "600 14pt Montserrat, Helvetica, Arial, sans-serif", ink);
-  drawCenteredText(ctx, name, centerX, height * 0.69, "700 28pt Helvetica, Arial, sans-serif", ink);
+  if (showMeta) {
+    drawCenteredText(ctx, orderNo, centerX, height * 0.62, "600 14pt Montserrat, Helvetica, Arial, sans-serif", ink);
+  }
+  drawCenteredText(ctx, name, centerX, showMeta ? height * 0.69 : height * 0.69, "700 28pt Helvetica, Arial, sans-serif", ink);
 
-  if (watermarkEnabled) {
+  if (showMeta && watermarkEnabled) {
     drawCenteredText(
       ctx,
       formatDateTime(timestamp),
@@ -155,20 +161,20 @@ function drawTag(canvas, { template, customerText, orderNo, watermarkEnabled, ti
   }
 }
 
-function CanvasPreview({ template, customerText, orderNo, watermarkEnabled, timestamp, canvasRef }) {
+function CanvasPreview({ template, customerText, orderNo, watermarkEnabled, timestamp, canvasRef, showMeta = true }) {
   useEffect(() => {
     let cancelled = false;
     const image = new Image();
     image.onload = () => {
       if (!cancelled && canvasRef.current) {
-        drawTag(canvasRef.current, { template, customerText, orderNo, watermarkEnabled, timestamp, image });
+        drawTag(canvasRef.current, { template, customerText, orderNo, watermarkEnabled, timestamp, image, showMeta });
       }
     };
     image.src = template.preview;
     return () => {
       cancelled = true;
     };
-  }, [template, customerText, orderNo, watermarkEnabled, timestamp, canvasRef]);
+  }, [template, customerText, orderNo, watermarkEnabled, timestamp, canvasRef, showMeta]);
 
   return <canvas className="tag-canvas" ref={canvasRef} />;
 }
@@ -250,6 +256,67 @@ function PrintPage({ orderId }) {
           打印
         </button>
       </div>
+      <section className="print-sheet">
+        <TicketPrint order={order} />
+      </section>
+    </main>
+  );
+}
+
+function CustomerTicketPrintPage({ orderId, autoReturn }) {
+  const [order, setOrder] = useState(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const style = document.createElement("style");
+    style.textContent = "@page { size: 7cm 11cm; margin: 0; }";
+    document.head.appendChild(style);
+    return () => style.remove();
+  }, []);
+
+  useEffect(() => {
+    async function loadOrder() {
+      try {
+        const response = await apiFetch(`/api/orders/${orderId}/ticket`);
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.message || "订单不存在");
+        }
+        setOrder(data);
+      } catch (loadError) {
+        setError(loadError.message);
+      }
+    }
+    loadOrder();
+  }, [orderId]);
+
+  useEffect(() => {
+    if (!order) {
+      return undefined;
+    }
+    const printTimer = window.setTimeout(() => window.print(), 350);
+    let returnTimer;
+    if (autoReturn) {
+      returnTimer = window.setTimeout(() => window.location.replace("/creator"), 1800);
+    }
+    return () => {
+      window.clearTimeout(printTimer);
+      if (returnTimer) {
+        window.clearTimeout(returnTimer);
+      }
+    };
+  }, [order, autoReturn]);
+
+  if (error) {
+    return <main className="print-page"><p className="message">{error}</p></main>;
+  }
+
+  if (!order) {
+    return <main className="print-page"><p>Loading...</p></main>;
+  }
+
+  return (
+    <main className="print-page">
       <section className="print-sheet">
         <TicketPrint order={order} />
       </section>
@@ -386,11 +453,12 @@ function ImpositionPrintPage({ orderIds, layoutOptions }) {
   );
 }
 
-function CustomerPage({ settings, previewNumber, onCreated }) {
+function CustomerPage({ settings, previewNumber, onCreated, terminalMode = false, autoPrint = false, autoReturn = false }) {
   const [templateId, setTemplateId] = useState("template_01");
   const [customerText, setCustomerText] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [messageType, setMessageType] = useState("neutral");
   const canvasRef = useRef(null);
   const template = templates.find((item) => item.id === templateId);
   const timestamp = useMemo(() => new Date(), [customerText, templateId, previewNumber]);
@@ -399,8 +467,10 @@ function CustomerPage({ settings, previewNumber, onCreated }) {
   async function submitOrder() {
     if (!normalizedName) {
       setMessage("请输入姓名");
+      setMessageType("error");
       return;
     }
+    const printWindow = autoPrint ? window.open("about:blank", "_blank") : null;
     setBusy(true);
     setMessage("");
     try {
@@ -414,17 +484,37 @@ function CustomerPage({ settings, previewNumber, onCreated }) {
         throw new Error(data.message || "生成失败");
       }
       setCustomerText("");
-      setMessage(`生成成功：${data.orderNo}`);
+      setMessage("生成成功");
+      setMessageType("success");
       onCreated();
+      if (autoPrint && data.id) {
+        const params = new URLSearchParams({ autoReturn: autoReturn ? "1" : "0" });
+        const printUrl = `/ticket/${data.id}?${params.toString()}`;
+        if (printWindow) {
+          printWindow.location.href = printUrl;
+        } else {
+          window.open(printUrl, "_blank", "noopener,noreferrer");
+        }
+      }
+      if (autoReturn) {
+        window.setTimeout(() => {
+          setMessage("");
+          setTemplateId("template_01");
+        }, 2200);
+      }
     } catch (error) {
+      if (printWindow && !printWindow.closed) {
+        printWindow.close();
+      }
       setMessage(error.message);
+      setMessageType("error");
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <main className="workspace">
+    <main className={terminalMode ? "workspace creator-kiosk" : "workspace"}>
       <section className="panel composer">
         <div className="section-title">
           <Tag size={20} />
@@ -456,15 +546,17 @@ function CustomerPage({ settings, previewNumber, onCreated }) {
           />
           <small className="field-hint">英文最多 12 字符，中文最多 6 字符，自动大写</small>
         </label>
-        <div className="number-strip">
-          <span>预览编号</span>
-          <strong>{previewNumber}</strong>
-        </div>
+        {!terminalMode && (
+          <div className="number-strip">
+            <span>预览编号</span>
+            <strong>{previewNumber}</strong>
+          </div>
+        )}
         <button className="primary-btn" disabled={busy} onClick={submitOrder} type="button">
           <CheckCircle2 size={18} />
           {busy ? "生成中" : "确认生成"}
         </button>
-        {message && <p className="message">{message}</p>}
+        {message && <p className={`message ${messageType}`}>{message}</p>}
       </section>
 
       <section className="preview-stage">
@@ -475,6 +567,7 @@ function CustomerPage({ settings, previewNumber, onCreated }) {
           template={template}
           timestamp={timestamp}
           watermarkEnabled={settings.watermarkEnabled}
+          showMeta={!terminalMode}
         />
       </section>
     </main>
@@ -815,6 +908,22 @@ function AdminPage({ settings, onSettingsSaved }) {
             />
             <span>开启时间水印</span>
           </label>
+          <label className="toggle">
+            <input
+              checked={Boolean(form.creatorAutoPrint)}
+              onChange={(event) => setForm({ ...form, creatorAutoPrint: event.target.checked })}
+              type="checkbox"
+            />
+            <span>/creator 自动打印</span>
+          </label>
+          <label className="toggle">
+            <input
+              checked={Boolean(form.creatorAutoReturn)}
+              onChange={(event) => setForm({ ...form, creatorAutoReturn: event.target.checked })}
+              type="checkbox"
+            />
+            <span>/creator 自动返回</span>
+          </label>
         </div>
         <button className="secondary-btn" onClick={saveSettings} type="button">
           <CheckCircle2 size={18} />
@@ -1117,7 +1226,10 @@ function AdminPage({ settings, onSettingsSaved }) {
 
 function App() {
   const printMatch = window.location.pathname.match(/^\/print\/(\d+)$/);
+  const ticketMatch = window.location.pathname.match(/^\/ticket\/(\d+)$/);
   const impositionPrintMatch = window.location.pathname === "/print-layout" || window.location.pathname === "/print-a4";
+  const creatorMode = window.location.pathname === "/creator";
+  const creatorParams = new URLSearchParams(window.location.search);
   const [page, setPage] = useState("customer");
   const [access, setAccess] = useState(null);
   const [settings, setSettings] = useState({
@@ -1125,6 +1237,8 @@ function App() {
     currentNumber: 1,
     digits: 4,
     watermarkEnabled: true,
+    creatorAutoPrint: false,
+    creatorAutoReturn: false,
     deploymentMode: "private"
   });
   const [previewNumber, setPreviewNumber] = useState("No.0001");
@@ -1192,6 +1306,10 @@ function App() {
     );
   }
 
+  if (ticketMatch) {
+    return <CustomerTicketPrintPage autoReturn={parseBooleanParam(new URLSearchParams(window.location.search).get("autoReturn"))} orderId={ticketMatch[1]} />;
+  }
+
   if (impositionPrintMatch) {
     const params = new URLSearchParams(window.location.search);
     const orderIds = params.get("ids")?.split(",").map(Number).filter(Boolean) ?? [];
@@ -1226,6 +1344,40 @@ function App() {
   const activePage = customerDisabled && page === "customer" ? "admin" : page;
   const showStaffNavigation = Boolean(access?.authenticated);
   const showLogout = Boolean(access?.authenticated || access?.invited);
+  const autoPrint = creatorParams.has("autoPrint")
+    ? parseBooleanParam(creatorParams.get("autoPrint"))
+    : Boolean(settings.creatorAutoPrint) || parseBooleanParam(import.meta.env.VITE_CREATOR_AUTO_PRINT);
+  const autoReturn = creatorParams.has("autoReturn")
+    ? parseBooleanParam(creatorParams.get("autoReturn"))
+    : Boolean(settings.creatorAutoReturn) || parseBooleanParam(import.meta.env.VITE_CREATOR_AUTO_RETURN);
+
+  if (creatorMode) {
+    return (
+      <div className="app-shell creator-shell">
+        <header className="creator-topbar">
+          <div>
+            <h1>DIY 行李牌自助定制</h1>
+            <p>{APP_VERSION}</p>
+          </div>
+          {showLogout && (
+            <button className="creator-logout" onClick={logout} type="button">
+              <LogOut size={24} />
+              退出
+            </button>
+          )}
+        </header>
+        {loadError && <p className="message app-message">{loadError}</p>}
+        <CustomerPage
+          autoPrint={autoPrint}
+          autoReturn={autoReturn}
+          onCreated={loadState}
+          previewNumber={previewNumber}
+          settings={settings}
+          terminalMode
+        />
+      </div>
+    );
+  }
 
   if (activePage === "admin" && !access?.authenticated) {
     return <AccessGate access={access} onAuthenticated={(nextAccess) => {
