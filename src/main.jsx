@@ -9,13 +9,12 @@ import {
   Printer,
   RefreshCw,
   Settings,
-  Tag,
   Trash2
 } from "lucide-react";
 import "./styles.css";
 
 const API_BASE = import.meta.env.DEV ? `${window.location.protocol}//${window.location.hostname}:3001` : "";
-const APP_VERSION = "V1.4.7";
+const APP_VERSION = "V1.4.8";
 const deploymentModes = [
   { value: "private", label: "Private", description: "仅员工登录后可使用定制页和后台" },
   { value: "invite", label: "Invite", description: "邀请码可访问定制页，后台仍需员工登录" },
@@ -453,7 +452,7 @@ function ImpositionPrintPage({ orderIds, layoutOptions }) {
   );
 }
 
-function CustomerPage({ settings, previewNumber, onCreated, terminalMode = false, autoPrint = false, autoReturn = false }) {
+function CustomerPage({ settings, previewNumber, onCreated, autoPrint = false, autoReturn = false }) {
   const [templateId, setTemplateId] = useState("template_01");
   const [customerText, setCustomerText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -514,46 +513,8 @@ function CustomerPage({ settings, previewNumber, onCreated, terminalMode = false
   }
 
   return (
-    <main className={terminalMode ? "workspace creator-kiosk" : "workspace"}>
-      <section className="panel composer">
-        <div className="section-title">
-          <Tag size={20} />
-          <span>现场定制</span>
-        </div>
-        <div className="template-grid">
-          {templates.map((item) => (
-            <button
-              className={`template-card ${templateId === item.id ? "active" : ""}`}
-              key={item.id}
-              onClick={() => setTemplateId(item.id)}
-              type="button"
-            >
-              <img alt={item.displayName} src={item.preview} />
-              <span className="template-meta">
-                <strong>{item.displayName}</strong>
-                <small>{item.name}</small>
-              </span>
-            </button>
-          ))}
-        </div>
-        <label className="field">
-          <span>姓名</span>
-          <input
-            maxLength={12}
-            value={customerText}
-            onChange={(event) => setCustomerText(normalizeCustomerName(event.target.value))}
-            placeholder="MARISSA"
-          />
-          <small className="field-hint">英文最多 12 字符，中文最多 6 字符，自动大写</small>
-        </label>
-        <button className="primary-btn" disabled={busy} onClick={submitOrder} type="button">
-          <CheckCircle2 size={18} />
-          {busy ? "生成中" : "确认生成"}
-        </button>
-        {message && <p className={`message ${messageType}`}>{message}</p>}
-      </section>
-
-      <section className="preview-stage">
+    <main className="creator-kiosk">
+      <section className="creator-preview-stage">
         <CanvasPreview
           canvasRef={canvasRef}
           customerText={normalizedName}
@@ -564,6 +525,31 @@ function CustomerPage({ settings, previewNumber, onCreated, terminalMode = false
           showMeta={false}
         />
       </section>
+
+      <form
+        className="creator-action-panel"
+        onSubmit={(event) => {
+          event.preventDefault();
+          submitOrder();
+        }}
+      >
+        <label className="creator-name-field">
+          <span>请输入姓名</span>
+          <input
+            autoComplete="off"
+            autoFocus
+            maxLength={12}
+            value={customerText}
+            onChange={(event) => setCustomerText(normalizeCustomerName(event.target.value))}
+            placeholder="MARISSA"
+          />
+        </label>
+        <button className="creator-submit-btn" disabled={busy} type="submit">
+          <CheckCircle2 size={42} />
+          {busy ? "生成中" : "提交生成"}
+        </button>
+        {message && <p className={`message ${messageType}`}>{message}</p>}
+      </form>
     </main>
   );
 }
@@ -1349,9 +1335,12 @@ function App() {
     return (
       <div className="app-shell creator-shell">
         <header className="creator-topbar">
-          <div>
-            <h1>DIY 行李牌自助定制</h1>
-            <p>{APP_VERSION}</p>
+          <div className="creator-brand">
+            <span className="brand-mark">K</span>
+            <div>
+              <h1>DIY 行李牌自助定制</h1>
+              <p>{APP_VERSION}</p>
+            </div>
           </div>
           {showLogout && (
             <button className="creator-logout" onClick={logout} type="button">
@@ -1367,7 +1356,6 @@ function App() {
           onCreated={loadState}
           previewNumber={previewNumber}
           settings={settings}
-          terminalMode
         />
       </div>
     );
@@ -1380,26 +1368,30 @@ function App() {
     }} />;
   }
 
+  const customerKiosk = activePage === "customer";
+
   return (
-    <div className="app-shell">
-      <header className="topbar">
-        <div className="brand">
+    <div className={`app-shell ${customerKiosk ? "creator-shell" : ""}`}>
+      <header className={customerKiosk ? "creator-topbar" : "topbar"}>
+        <div className={customerKiosk ? "creator-brand" : "brand"}>
           <span className="brand-mark">K</span>
           <div>
             <h1>DIY 行李牌现场定制</h1>
-            <p>客户定制 / 订单后台 / 文件导出 / {APP_VERSION}</p>
+            <p>{customerKiosk ? APP_VERSION : `客户定制 / 订单后台 / 文件导出 / ${APP_VERSION}`}</p>
           </div>
         </div>
         <nav>
-          <button
-            className={activePage === "customer" ? "active" : ""}
-            disabled={customerDisabled}
-            onClick={() => setPage("customer")}
-            type="button"
-          >
-            <Home size={18} />
-            定制页
-          </button>
+          {!customerKiosk && (
+            <button
+              className={activePage === "customer" ? "active" : ""}
+              disabled={customerDisabled}
+              onClick={() => setPage("customer")}
+              type="button"
+            >
+              <Home size={18} />
+              定制页
+            </button>
+          )}
           {showStaffNavigation && (
             <button className={activePage === "admin" ? "active" : ""} onClick={() => setPage("admin")} type="button">
               <Settings size={18} />
