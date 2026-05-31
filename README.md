@@ -1,6 +1,6 @@
 # DIY Luggage Tag MVP
 
-Version: `1.4.8`
+Version: `1.4.9`
 
 现场 DIY 行李牌定制系统 MVP，包含客户定制页、后台订单页、编号设置、订单生成、PNG/PDF 下载和打印状态管理。
 
@@ -37,6 +37,7 @@ npm run dev
 - V1.4.6 自助终端定制页：`/creator` 竖屏终端风格，预览仅显示模板和姓名，支持 `autoPrint` / `autoReturn`
 - V1.4.7 客户预览统一：普通定制页和 `/creator` 预览均只显示模板和姓名，编号与时间仅进入打印小票
 - V1.4.8 Kiosk 单动作布局：客户定制页和 `/creator` 改为顶部品牌栏、中间大预览、下方超大姓名输入和提交按钮
+- V1.4.9 响应式 Kiosk：保留颜色选择，竖屏预览在上操作在下，横屏/电脑操作与预览左右布局
 
 ## Access Control
 

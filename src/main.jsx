@@ -14,7 +14,7 @@ import {
 import "./styles.css";
 
 const API_BASE = import.meta.env.DEV ? `${window.location.protocol}//${window.location.hostname}:3001` : "";
-const APP_VERSION = "V1.4.8";
+const APP_VERSION = "V1.4.9";
 const deploymentModes = [
   { value: "private", label: "Private", description: "仅员工登录后可使用定制页和后台" },
   { value: "invite", label: "Invite", description: "邀请码可访问定制页，后台仍需员工登录" },
@@ -533,6 +533,23 @@ function CustomerPage({ settings, previewNumber, onCreated, autoPrint = false, a
           submitOrder();
         }}
       >
+        <fieldset className="creator-color-choice">
+          <legend>选择颜色</legend>
+          <div>
+            {templates.map((item) => (
+              <button
+                aria-pressed={templateId === item.id}
+                className={templateId === item.id ? "active" : ""}
+                key={item.id}
+                onClick={() => setTemplateId(item.id)}
+                type="button"
+              >
+                <span style={{ backgroundColor: item.color }} />
+                {item.displayName}
+              </button>
+            ))}
+          </div>
+        </fieldset>
         <label className="creator-name-field">
           <span>请输入姓名</span>
           <input
