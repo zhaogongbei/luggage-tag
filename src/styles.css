@@ -462,6 +462,7 @@ th {
 @media print {
   @page {
     margin: 0;
+    size: 7cm 11cm;
   }
 
   body {
@@ -484,9 +485,10 @@ th {
   }
 
   .print-sheet img {
-    height: auto;
+    height: 11cm;
     max-height: none;
     max-width: none;
-    width: 100%;
+    object-fit: contain;
+    width: 7cm;
   }
 }
