@@ -41,13 +41,25 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS orders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    order_no TEXT NOT NULL UNIQUE,
+    event_id INTEGER,
+    order_no TEXT NOT NULL,
     template_id TEXT NOT NULL,
     customer_text TEXT NOT NULL,
     generated_at TEXT NOT NULL,
     print_status TEXT NOT NULL DEFAULT 'pending',
     png_path TEXT NOT NULL,
     pdf_path TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    prefix TEXT NOT NULL,
+    event_date TEXT NOT NULL,
+    current_number INTEGER NOT NULL,
+    digits INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    is_active INTEGER NOT NULL DEFAULT 0
   );
 `);
 
@@ -84,6 +96,74 @@ for (const [key, value] of Object.entries(defaultSettings)) {
   db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)").run(key, value);
 }
 
+function hasColumn(tableName, columnName) {
+  return db.prepare(`PRAGMA table_info(${tableName})`).all().some((column) => column.name === columnName);
+}
+
+function migrateOrdersTable() {
+  const orderTable = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'orders'").get();
+  const needsEventColumn = !hasColumn("orders", "event_id");
+  const hasGlobalUniqueOrderNo = /\border_no\s+TEXT\s+NOT\s+NULL\s+UNIQUE\b/i.test(orderTable?.sql ?? "");
+
+  if (!needsEventColumn && !hasGlobalUniqueOrderNo) {
+    return;
+  }
+
+  db.exec("BEGIN IMMEDIATE TRANSACTION");
+  try {
+    db.exec(`
+      CREATE TABLE orders_next (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_id INTEGER,
+        order_no TEXT NOT NULL,
+        template_id TEXT NOT NULL,
+        customer_text TEXT NOT NULL,
+        generated_at TEXT NOT NULL,
+        print_status TEXT NOT NULL DEFAULT 'pending',
+        png_path TEXT NOT NULL,
+        pdf_path TEXT NOT NULL
+      );
+    `);
+    const eventColumn = needsEventColumn ? "NULL AS event_id" : "event_id";
+    db.exec(`
+      INSERT INTO orders_next (id, event_id, order_no, template_id, customer_text, generated_at, print_status, png_path, pdf_path)
+      SELECT id, ${eventColumn}, order_no, template_id, customer_text, generated_at, print_status, png_path, pdf_path
+      FROM orders;
+      DROP TABLE orders;
+      ALTER TABLE orders_next RENAME TO orders;
+    `);
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+function ensureActiveEvent() {
+  let activeEvent = db.prepare("SELECT * FROM events WHERE is_active = 1 ORDER BY id DESC LIMIT 1").get();
+  if (activeEvent) {
+    return activeEvent;
+  }
+
+  const settings = db.prepare("SELECT key, value FROM settings").all();
+  const settingsMap = Object.fromEntries(settings.map((row) => [row.key, row.value]));
+  const prefix = String(settingsMap.prefix ?? defaultSettings.prefix).slice(0, 12);
+  const currentNumber = Math.max(1, Number.parseInt(settingsMap.currentNumber ?? defaultSettings.currentNumber, 10) || 1);
+  const digits = Math.min(8, Math.max(1, Number.parseInt(settingsMap.digits ?? defaultSettings.digits, 10) || 4));
+  const now = new Date().toISOString();
+  const today = now.slice(0, 10);
+  const result = db.prepare(
+    `INSERT INTO events (name, prefix, event_date, current_number, digits, created_at, is_active)
+     VALUES (?, ?, ?, ?, ?, ?, 1)`
+  ).run("默认活动", prefix, today, currentNumber, digits, now);
+  activeEvent = db.prepare("SELECT * FROM events WHERE id = ?").get(result.lastInsertRowid);
+  db.prepare("UPDATE orders SET event_id = ? WHERE event_id IS NULL").run(activeEvent.id);
+  return activeEvent;
+}
+
+migrateOrdersTable();
+ensureActiveEvent();
+
 const app = express();
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: "12mb" }));
@@ -95,16 +175,18 @@ if (process.env.NODE_ENV === "production") {
 async function getSettings() {
   const rows = db.prepare("SELECT key, value FROM settings").all();
   const settings = Object.fromEntries(rows.map((row) => [row.key, row.value]));
+  const activeEvent = getActiveEvent();
   return {
-    prefix: settings.prefix ?? defaultSettings.prefix,
-    currentNumber: Number(settings.currentNumber ?? defaultSettings.currentNumber),
-    digits: Number(settings.digits ?? defaultSettings.digits),
+    prefix: activeEvent.prefix,
+    currentNumber: Number(activeEvent.current_number),
+    digits: Number(activeEvent.digits),
     watermarkEnabled: (settings.watermarkEnabled ?? defaultSettings.watermarkEnabled) === "true",
     selectedPrinter: settings.selectedPrinter ?? defaultSettings.selectedPrinter,
     deploymentMode: deploymentModes.includes(settings.deploymentMode)
       ? settings.deploymentMode
       : defaultSettings.deploymentMode,
-    inviteCode: settings.inviteCode ?? defaultSettings.inviteCode
+    inviteCode: settings.inviteCode ?? defaultSettings.inviteCode,
+    activeEvent: toPublicEvent(activeEvent)
   };
 }
 
@@ -114,8 +196,56 @@ function toClientSettings(settings) {
     currentNumber: settings.currentNumber,
     digits: settings.digits,
     watermarkEnabled: settings.watermarkEnabled,
-    deploymentMode: settings.deploymentMode
+    deploymentMode: settings.deploymentMode,
+    activeEvent: settings.activeEvent
   };
+}
+
+function getActiveEvent() {
+  return ensureActiveEvent();
+}
+
+function toPublicEvent(event) {
+  if (!event) {
+    return null;
+  }
+  return {
+    id: event.id,
+    name: event.name,
+    prefix: event.prefix,
+    eventDate: event.event_date,
+    currentNumber: Number(event.current_number),
+    digits: Number(event.digits),
+    createdAt: event.created_at,
+    isActive: Boolean(event.is_active)
+  };
+}
+
+function formatEventOrderNo(event) {
+  return `${event.prefix}${String(event.current_number).padStart(event.digits, "0")}`;
+}
+
+function syncLegacyNumberSettings(event) {
+  db.prepare("UPDATE settings SET value = ? WHERE key = 'prefix'").run(event.prefix);
+  db.prepare("UPDATE settings SET value = ? WHERE key = 'currentNumber'").run(String(event.current_number));
+  db.prepare("UPDATE settings SET value = ? WHERE key = 'digits'").run(String(event.digits));
+}
+
+function normalizeEventPayload(body) {
+  const name = String(body.name ?? "").trim().slice(0, 80);
+  const prefix = String(body.prefix ?? "No.").trim().slice(0, 12) || "No.";
+  const eventDate = String(body.eventDate ?? new Date().toISOString().slice(0, 10)).slice(0, 10);
+  const startNumber = Math.max(1, Number.parseInt(body.startNumber ?? body.currentNumber, 10) || 1);
+  const digits = Math.min(8, Math.max(1, Number.parseInt(body.digits, 10) || 4));
+
+  if (!name) {
+    throw new Error("活动名称不能为空");
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(eventDate)) {
+    throw new Error("活动日期格式无效");
+  }
+
+  return { name, prefix, eventDate, startNumber, digits };
 }
 
 function parseCookies(req) {
@@ -231,10 +361,6 @@ async function requireSettingsAccess(req, res, next) {
   next();
 }
 
-function formatOrderNo(settings) {
-  return `${settings.prefix}${String(settings.currentNumber).padStart(settings.digits, "0")}`;
-}
-
 function imageDataToBuffer(dataUrl) {
   const match = dataUrl.match(/^data:image\/png;base64,(.+)$/);
   if (!match) {
@@ -266,6 +392,9 @@ function toPublicOrder(order) {
   }
   return {
     id: order.id,
+    event_id: order.event_id,
+    event_name: order.event_name ?? "",
+    event_date: order.event_date ?? "",
     order_no: order.order_no,
     template_id: order.template_id,
     customer_text: order.customer_text,
@@ -286,7 +415,12 @@ function getOrdersByIds(orderIds) {
     return [];
   }
   const placeholders = orderIds.map(() => "?").join(",");
-  const rows = db.prepare(`SELECT * FROM orders WHERE id IN (${placeholders})`).all(...orderIds);
+  const rows = db.prepare(`
+    SELECT orders.*, events.name AS event_name, events.event_date AS event_date
+    FROM orders
+    LEFT JOIN events ON events.id = orders.event_id
+    WHERE orders.id IN (${placeholders})
+  `).all(...orderIds);
   const byId = new Map(rows.map((order) => [order.id, order]));
   return orderIds.map((id) => byId.get(id)).filter(Boolean);
 }
@@ -580,6 +714,12 @@ app.put("/api/settings", requireStaff, async (req, res) => {
   db.prepare("UPDATE settings SET value = ? WHERE key = 'prefix'").run(prefix);
   db.prepare("UPDATE settings SET value = ? WHERE key = 'currentNumber'").run(String(currentNumber));
   db.prepare("UPDATE settings SET value = ? WHERE key = 'digits'").run(String(digits));
+  db.prepare("UPDATE events SET prefix = ?, current_number = ?, digits = ? WHERE id = ?").run(
+    prefix,
+    currentNumber,
+    digits,
+    getActiveEvent().id
+  );
   db.prepare("UPDATE settings SET value = ? WHERE key = 'watermarkEnabled'").run(String(watermarkEnabled));
   db.prepare("UPDATE settings SET value = ? WHERE key = 'selectedPrinter'").run(selectedPrinter);
   db.prepare("UPDATE settings SET value = ? WHERE key = 'deploymentMode'").run(deploymentMode);
@@ -587,13 +727,43 @@ app.put("/api/settings", requireStaff, async (req, res) => {
   res.json(await getSettings());
 });
 
+app.post("/api/events/reset", requireStaff, async (req, res) => {
+  try {
+    const event = normalizeEventPayload(req.body);
+    const now = new Date().toISOString();
+    db.exec("BEGIN IMMEDIATE TRANSACTION");
+    db.prepare("UPDATE events SET is_active = 0").run();
+    const result = db.prepare(
+      `INSERT INTO events (name, prefix, event_date, current_number, digits, created_at, is_active)
+       VALUES (?, ?, ?, ?, ?, ?, 1)`
+    ).run(event.name, event.prefix, event.eventDate, event.startNumber, event.digits, now);
+    const activeEvent = db.prepare("SELECT * FROM events WHERE id = ?").get(result.lastInsertRowid);
+    syncLegacyNumberSettings(activeEvent);
+    db.exec("COMMIT");
+    res.json({ event: toPublicEvent(activeEvent), settings: await getSettings() });
+  } catch (error) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {
+      // no active transaction
+    }
+    res.status(400).json({ message: error.message || "新活动重置失败" });
+  }
+});
+
 app.get("/api/preview-number", requireCustomerAccess, async (_req, res) => {
   const settings = await getSettings();
-  res.json({ orderNo: formatOrderNo(settings), settings: toClientSettings(settings) });
+  const activeEvent = getActiveEvent();
+  res.json({ orderNo: formatEventOrderNo(activeEvent), settings: toClientSettings(settings) });
 });
 
 app.get("/api/orders", requireStaff, async (_req, res) => {
-  const rows = db.prepare("SELECT * FROM orders ORDER BY id DESC").all();
+  const rows = db.prepare(`
+    SELECT orders.*, events.name AS event_name, events.event_date AS event_date
+    FROM orders
+    LEFT JOIN events ON events.id = orders.event_id
+    ORDER BY orders.id DESC
+  `).all();
   res.json(rows.map(toPublicOrder));
 });
 
@@ -692,19 +862,20 @@ app.post("/api/orders", requireCustomerAccess, async (req, res) => {
 
   try {
     db.exec("BEGIN IMMEDIATE TRANSACTION");
-    const settings = await getSettings();
-    const orderNo = formatOrderNo(settings);
+    const activeEvent = getActiveEvent();
+    const orderNo = formatEventOrderNo(activeEvent);
     const generatedAt = new Date().toISOString();
-    const safeName = orderNo.replace(/[^a-zA-Z0-9_.-]/g, "_");
+    const safeName = `${orderNo}-${generatedAt}-${crypto.randomBytes(4).toString("hex")}`.replace(/[^a-zA-Z0-9_.-]/g, "_");
     const pngPath = path.join(exportDir, `${safeName}.png`);
     const pdfPath = path.join(exportDir, `${safeName}.pdf`);
 
     await fs.writeFile(pngPath, imageDataToBuffer(pngDataUrl));
     await createTicketPdf({ order_no: orderNo, customer_text: customerText, generated_at: generatedAt }, pdfPath);
     db.prepare(
-      `INSERT INTO orders (order_no, template_id, customer_text, generated_at, print_status, png_path, pdf_path)
-       VALUES (?, ?, ?, ?, 'pending', ?, ?)`
+      `INSERT INTO orders (event_id, order_no, template_id, customer_text, generated_at, print_status, png_path, pdf_path)
+       VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)`
     ).run(
+      activeEvent.id,
       orderNo,
       templateId,
       customerText,
@@ -712,7 +883,9 @@ app.post("/api/orders", requireCustomerAccess, async (req, res) => {
       pngPath,
       pdfPath
     );
-    db.prepare("UPDATE settings SET value = ? WHERE key = 'currentNumber'").run(String(settings.currentNumber + 1));
+    const nextNumber = Number(activeEvent.current_number) + 1;
+    db.prepare("UPDATE events SET current_number = ? WHERE id = ?").run(nextNumber, activeEvent.id);
+    syncLegacyNumberSettings({ ...activeEvent, current_number: nextNumber });
     db.exec("COMMIT");
     res.status(201).json({ orderNo, generatedAt });
   } catch (error) {
@@ -731,6 +904,19 @@ app.patch("/api/orders/:id/print-status", requireStaff, async (req, res) => {
   db.prepare("UPDATE orders SET print_status = ? WHERE id = ?").run(status, req.params.id);
   const order = db.prepare("SELECT * FROM orders WHERE id = ?").get(req.params.id);
   res.json(toPublicOrder(order));
+});
+
+app.delete("/api/orders/:id", requireStaff, async (req, res) => {
+  const order = db.prepare("SELECT * FROM orders WHERE id = ?").get(req.params.id);
+  if (!order) {
+    return res.status(404).json({ message: "Order not found" });
+  }
+  db.prepare("DELETE FROM orders WHERE id = ?").run(req.params.id);
+  await Promise.allSettled([
+    fs.unlink(order.png_path),
+    fs.unlink(order.pdf_path)
+  ]);
+  res.json({ ok: true, order: toPublicOrder(order) });
 });
 
 app.get("/api/printers", requireStaff, async (_req, res) => {

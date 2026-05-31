@@ -9,12 +9,13 @@ import {
   Printer,
   RefreshCw,
   Settings,
-  Tag
+  Tag,
+  Trash2
 } from "lucide-react";
 import "./styles.css";
 
 const API_BASE = import.meta.env.DEV ? `${window.location.protocol}//${window.location.hostname}:3001` : "";
-const APP_VERSION = "V1.4.3";
+const APP_VERSION = "V1.4.4";
 const deploymentModes = [
   { value: "private", label: "Private", description: "仅员工登录后可使用定制页和后台" },
   { value: "invite", label: "Invite", description: "邀请码可访问定制页，后台仍需员工登录" },
@@ -39,6 +40,16 @@ const defaultLayoutOptions = {
   cropMarks: true,
   showOrderNo: true
 };
+
+function createEventFormFromSettings(settings) {
+  return {
+    name: settings.activeEvent?.name ?? "",
+    prefix: settings.activeEvent?.prefix ?? settings.prefix ?? "No.",
+    eventDate: settings.activeEvent?.eventDate ?? new Date().toISOString().slice(0, 10),
+    startNumber: settings.activeEvent?.currentNumber ?? settings.currentNumber ?? 1,
+    digits: settings.activeEvent?.digits ?? settings.digits ?? 4
+  };
+}
 
 const templates = [
   {
@@ -582,6 +593,7 @@ function StaffOnlyPage({ children }) {
 function AdminPage({ settings, onSettingsSaved }) {
   const [orders, setOrders] = useState([]);
   const [form, setForm] = useState(settings);
+  const [eventForm, setEventForm] = useState(createEventFormFromSettings(settings));
   const [printerState, setPrinterState] = useState({ printers: [], defaultPrinter: "", selectedPrinter: "" });
   const [printerMessage, setPrinterMessage] = useState("");
   const [selectedOrderIds, setSelectedOrderIds] = useState([]);
@@ -590,6 +602,7 @@ function AdminPage({ settings, onSettingsSaved }) {
 
   useEffect(() => {
     setForm(settings);
+    setEventForm(createEventFormFromSettings(settings));
   }, [settings]);
 
   async function loadOrders() {
@@ -638,6 +651,24 @@ function AdminPage({ settings, onSettingsSaved }) {
     onSettingsSaved(await response.json());
   }
 
+  async function resetEvent() {
+    if (!window.confirm("确认开启新活动并重置编号？历史订单编号不会改变。")) {
+      return;
+    }
+    const response = await apiFetch("/api/events/reset", {
+      method: "POST",
+      body: JSON.stringify(eventForm)
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      setPrinterMessage(data.message || "新活动重置失败");
+      return;
+    }
+    onSettingsSaved(data.settings);
+    setPrinterMessage("新活动已启用，后续订单将使用新编号");
+    loadOrders();
+  }
+
   async function togglePrinted(order) {
     await apiFetch(`/api/orders/${order.id}/print-status`, {
       method: "PATCH",
@@ -645,6 +676,20 @@ function AdminPage({ settings, onSettingsSaved }) {
         printStatus: order.print_status === "printed" ? "pending" : "printed"
       })
     });
+    loadOrders();
+  }
+
+  async function deleteOrder(order) {
+    if (!window.confirm(`确认删除订单 ${order.order_no}？删除不会影响当前编号。`)) {
+      return;
+    }
+    const response = await apiFetch(`/api/orders/${order.id}`, { method: "DELETE" });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      setPrinterMessage(data.message || "订单删除失败");
+      return;
+    }
+    setSelectedOrderIds((ids) => ids.filter((id) => id !== order.id));
     loadOrders();
   }
 
@@ -774,6 +819,57 @@ function AdminPage({ settings, onSettingsSaved }) {
         <button className="secondary-btn" onClick={saveSettings} type="button">
           <CheckCircle2 size={18} />
           保存设置
+        </button>
+      </section>
+
+      <section className="panel event-reset-panel">
+        <div className="section-title">
+          <RefreshCw size={20} />
+          <span>新活动重置编号</span>
+        </div>
+        <div className="settings-grid">
+          <label className="field">
+            <span>活动名称</span>
+            <input
+              value={eventForm.name}
+              onChange={(event) => setEventForm({ ...eventForm, name: event.target.value })}
+              placeholder="例如：上海快闪店"
+            />
+          </label>
+          <label className="field">
+            <span>编号前缀</span>
+            <input value={eventForm.prefix} onChange={(event) => setEventForm({ ...eventForm, prefix: event.target.value })} />
+          </label>
+          <label className="field">
+            <span>活动日期</span>
+            <input type="date" value={eventForm.eventDate} onChange={(event) => setEventForm({ ...eventForm, eventDate: event.target.value })} />
+          </label>
+          <label className="field">
+            <span>起始编号</span>
+            <input
+              min="1"
+              type="number"
+              value={eventForm.startNumber}
+              onChange={(event) => setEventForm({ ...eventForm, startNumber: Number(event.target.value) })}
+            />
+          </label>
+          <label className="field">
+            <span>编号位数</span>
+            <input
+              min="1"
+              max="8"
+              type="number"
+              value={eventForm.digits}
+              onChange={(event) => setEventForm({ ...eventForm, digits: Number(event.target.value) })}
+            />
+          </label>
+          <div className="mode-help">
+            重置只影响后续新订单；历史订单编号、打印和删除均保持独立。
+          </div>
+        </div>
+        <button className="secondary-btn" onClick={resetEvent} type="button">
+          <RefreshCw size={18} />
+          重置为新活动
         </button>
       </section>
 
@@ -955,6 +1051,7 @@ function AdminPage({ settings, onSettingsSaved }) {
                   />
                 </th>
                 <th>编号</th>
+                <th>活动</th>
                 <th>客户文字</th>
                 <th>模板</th>
                 <th>生成时间</th>
@@ -974,6 +1071,7 @@ function AdminPage({ settings, onSettingsSaved }) {
                     />
                   </td>
                   <td>{order.order_no}</td>
+                  <td>{order.event_name ? `${order.event_name}${order.event_date ? ` / ${order.event_date}` : ""}` : "-"}</td>
                   <td>{order.customer_text}</td>
                   <td>{templates.find((item) => item.id === order.template_id)?.displayName ?? legacyTemplateNames[order.template_id] ?? order.template_id}</td>
                   <td>{formatDateTime(order.generated_at)}</td>
@@ -995,12 +1093,16 @@ function AdminPage({ settings, onSettingsSaved }) {
                       <CheckCircle2 size={17} />
                       {order.print_status === "printed" ? "标记待打" : "标记已打"}
                     </button>
+                    <button onClick={() => deleteOrder(order)} title="删除订单不影响编号" type="button">
+                      <Trash2 size={17} />
+                      删除
+                    </button>
                   </td>
                 </tr>
               ))}
               {!orders.length && (
                 <tr>
-                  <td colSpan="7" className="empty">
+                  <td colSpan="8" className="empty">
                     暂无订单
                   </td>
                 </tr>
