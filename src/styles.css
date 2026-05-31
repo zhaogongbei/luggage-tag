@@ -18,7 +18,7 @@
 body {
   margin: 0;
   min-width: 320px;
-  min-height: 100vh;
+  min-height: 100dvh;
   background:
     linear-gradient(90deg, rgba(15, 118, 110, 0.06) 1px, transparent 1px),
     linear-gradient(rgba(15, 118, 110, 0.06) 1px, transparent 1px),
@@ -39,7 +39,7 @@ a {
 }
 
 .app-shell {
-  min-height: 100vh;
+  min-height: 100dvh;
 }
 
 .topbar {
@@ -133,7 +133,7 @@ nav button:disabled {
   align-items: center;
   display: flex;
   justify-content: center;
-  min-height: 100vh;
+  min-height: 100dvh;
   padding: 24px;
 }
 
@@ -341,7 +341,7 @@ input[type="checkbox"] {
   background: transparent;
   box-shadow: none;
   height: auto;
-  max-height: calc(100vh - 150px);
+  max-height: calc(100dvh - 150px);
   max-width: min(100%, 560px);
   width: auto;
 }
@@ -350,7 +350,7 @@ input[type="checkbox"] {
   background:
     radial-gradient(circle at 50% 0%, rgba(15, 118, 110, 0.14), transparent 32%),
     #f5f2ea;
-  min-height: 100vh;
+  min-height: 100dvh;
 }
 
 .creator-topbar {
@@ -397,8 +397,9 @@ input[type="checkbox"] {
     "preview"
     "controls";
   grid-template-rows: minmax(0, 1fr) auto;
-  min-height: calc(100vh - 112px);
+  min-height: calc(100dvh - 112px);
   padding: 0 clamp(28px, 5vw, 72px) clamp(32px, 5vh, 72px);
+  transition: gap 180ms ease, padding 180ms ease, transform 180ms ease;
 }
 
 .creator-preview-stage {
@@ -407,11 +408,13 @@ input[type="checkbox"] {
   grid-area: preview;
   justify-content: center;
   min-height: 0;
+  transition: transform 180ms ease;
 }
 
 .creator-preview-stage .tag-canvas {
   max-height: min(58vh, 720px);
   max-width: min(92vw, 820px);
+  transition: max-height 180ms ease, max-width 180ms ease, transform 180ms ease;
 }
 
 .creator-action-panel {
@@ -423,6 +426,34 @@ input[type="checkbox"] {
   grid-area: controls;
   grid-template-columns: 1fr;
   padding: clamp(24px, 4vh, 48px);
+  transition: transform 180ms ease, padding 180ms ease;
+}
+
+.creator-kiosk.keyboard-open {
+  gap: clamp(10px, 1.5vh, 20px);
+  padding-bottom: max(12px, calc(var(--keyboard-height, 0px) * 0.12));
+}
+
+.creator-kiosk.keyboard-open .creator-preview-stage .tag-canvas {
+  max-height: min(30dvh, 360px);
+  max-width: min(72vw, 520px);
+}
+
+.creator-kiosk.keyboard-open .creator-action-panel {
+  transform: translateY(calc(-1 * max(28px, min(22dvh, calc(var(--keyboard-height, 0px) * 0.45)))));
+}
+
+@supports not (height: 100dvh) {
+  body,
+  .app-shell,
+  .access-page,
+  .creator-shell {
+    min-height: 100vh;
+  }
+
+  .creator-kiosk {
+    min-height: calc(100vh - 112px);
+  }
 }
 
 .creator-color-choice {
@@ -665,7 +696,7 @@ th {
   background: transparent;
   display: grid;
   gap: 18px;
-  min-height: 100vh;
+  min-height: 100dvh;
   padding: 24px;
 }
 
@@ -701,7 +732,7 @@ th {
 .print-sheet img {
   display: block;
   height: auto;
-  max-height: calc(100vh - 120px);
+  max-height: calc(100dvh - 120px);
   max-width: min(100%, 520px);
   width: auto;
 }
@@ -744,7 +775,7 @@ th {
   display: grid;
   gap: 18px;
   justify-items: center;
-  min-height: 100vh;
+  min-height: 100dvh;
   padding: 24px;
 }
 

@@ -14,7 +14,7 @@ import {
 import "./styles.css";
 
 const API_BASE = import.meta.env.DEV ? `${window.location.protocol}//${window.location.hostname}:3001` : "";
-const APP_VERSION = "V1.4.12";
+const APP_VERSION = "V1.4.13";
 const deploymentModes = [
   { value: "private", label: "Private", description: "仅员工登录后可使用定制页和后台" },
   { value: "invite", label: "Invite", description: "邀请码可访问定制页，后台仍需员工登录" },
@@ -468,11 +468,51 @@ function CustomerPage({ settings, previewNumber, onCreated, autoPrint = false, a
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("neutral");
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
   const canvasRef = useRef(null);
+  const inputRef = useRef(null);
   const template = templates.find((item) => item.id === templateId);
   const timestamp = useMemo(() => new Date(), [customerText, templateId, previewNumber]);
   const normalizedName = normalizeCustomerName(customerText);
   const finalName = finalizeCustomerName(customerText);
+
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    if (!viewport) {
+      return undefined;
+    }
+    const initialHeight = viewport.height;
+    function updateKeyboardState() {
+      const keyboardHeight = Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop);
+      document.documentElement.style.setProperty("--keyboard-height", `${Math.round(keyboardHeight)}px`);
+      setKeyboardOpen(document.activeElement === inputRef.current && keyboardHeight > 80);
+    }
+    viewport.addEventListener("resize", updateKeyboardState);
+    viewport.addEventListener("scroll", updateKeyboardState);
+    document.documentElement.style.setProperty("--initial-viewport-height", `${Math.round(initialHeight)}px`);
+    updateKeyboardState();
+    return () => {
+      viewport.removeEventListener("resize", updateKeyboardState);
+      viewport.removeEventListener("scroll", updateKeyboardState);
+      document.documentElement.style.removeProperty("--keyboard-height");
+      document.documentElement.style.removeProperty("--initial-viewport-height");
+    };
+  }, []);
+
+  function focusNameInput() {
+    setKeyboardOpen(true);
+    window.setTimeout(() => {
+      inputRef.current?.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+    }, 80);
+  }
+
+  function blurNameInput() {
+    window.setTimeout(() => {
+      if (document.activeElement !== inputRef.current) {
+        setKeyboardOpen(false);
+      }
+    }, 120);
+  }
 
   async function submitOrder() {
     if (!isValidCustomerName(finalName)) {
@@ -524,7 +564,7 @@ function CustomerPage({ settings, previewNumber, onCreated, autoPrint = false, a
   }
 
   return (
-    <main className="creator-kiosk">
+    <main className={`creator-kiosk ${keyboardOpen ? "keyboard-open" : ""}`}>
       <section className="creator-preview-stage">
         <CanvasPreview
           canvasRef={canvasRef}
@@ -572,8 +612,11 @@ function CustomerPage({ settings, previewNumber, onCreated, autoPrint = false, a
             lang="en"
             maxLength={12}
             pattern="[A-Za-z ]*"
+            ref={inputRef}
             spellCheck="false"
             value={customerText}
+            onBlur={blurNameInput}
+            onFocus={focusNameInput}
             onChange={(event) => setCustomerText(normalizeCustomerName(event.target.value))}
             placeholder="MARISSA"
           />
