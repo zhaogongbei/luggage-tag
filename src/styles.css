@@ -176,7 +176,7 @@ nav button.active,
 
 .template-card img {
   aspect-ratio: 4 / 5;
-  background: #f6f6f2;
+  background: transparent;
   display: block;
   object-fit: cover;
   object-position: top center;
@@ -283,7 +283,7 @@ select:focus {
 
 .tag-canvas {
   background: transparent;
-  box-shadow: 0 30px 90px rgba(22, 32, 29, 0.22);
+  box-shadow: none;
   height: auto;
   max-height: calc(100vh - 150px);
   max-width: min(100%, 560px);
@@ -466,11 +466,11 @@ th {
   }
 
   body {
-    background: white;
+    background: transparent;
   }
 
   .print-page {
-    background: white;
+    background: transparent;
     display: block;
     min-height: auto;
     padding: 0;
