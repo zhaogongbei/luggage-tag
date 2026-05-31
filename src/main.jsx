@@ -14,7 +14,7 @@ import {
 import "./styles.css";
 
 const API_BASE = import.meta.env.DEV ? `${window.location.protocol}//${window.location.hostname}:3001` : "";
-const APP_VERSION = "V1.4.11";
+const APP_VERSION = "V1.4.12";
 const deploymentModes = [
   { value: "private", label: "Private", description: "仅员工登录后可使用定制页和后台" },
   { value: "invite", label: "Invite", description: "邀请码可访问定制页，后台仍需员工登录" },
@@ -108,12 +108,19 @@ function formatDateTime(value = new Date()) {
 
 function normalizeCustomerName(value) {
   return String(value ?? "")
-    .replace(/[^A-Za-z]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z ]/g, "")
+    .replace(/^ +/g, "")
+    .replace(/ {2,}/g, " ")
     .slice(0, 12);
 }
 
+function finalizeCustomerName(value) {
+  return normalizeCustomerName(value).trim();
+}
+
 function isValidCustomerName(value) {
-  return /^[A-Za-z]{1,12}$/.test(value);
+  return /^[A-Z]+(?: [A-Z]+)*$/.test(value) && value.length <= 12;
 }
 
 function parseBooleanParam(value) {
@@ -465,10 +472,11 @@ function CustomerPage({ settings, previewNumber, onCreated, autoPrint = false, a
   const template = templates.find((item) => item.id === templateId);
   const timestamp = useMemo(() => new Date(), [customerText, templateId, previewNumber]);
   const normalizedName = normalizeCustomerName(customerText);
+  const finalName = finalizeCustomerName(customerText);
 
   async function submitOrder() {
-    if (!isValidCustomerName(normalizedName)) {
-      setMessage("请输入 1-12 位英文字母");
+    if (!isValidCustomerName(finalName)) {
+      setMessage("请输入 1-12 位英文大写字母，可包含空格");
       setMessageType("error");
       return;
     }
@@ -479,7 +487,7 @@ function CustomerPage({ settings, previewNumber, onCreated, autoPrint = false, a
       const pngDataUrl = canvasRef.current.toDataURL("image/png");
       const response = await apiFetch("/api/orders", {
         method: "POST",
-        body: JSON.stringify({ templateId, customerText: normalizedName, pngDataUrl })
+        body: JSON.stringify({ templateId, customerText: finalName, pngDataUrl })
       });
       const data = await response.json();
       if (!response.ok) {
@@ -558,12 +566,12 @@ function CustomerPage({ settings, previewNumber, onCreated, autoPrint = false, a
           <input
             autoComplete="off"
             autoFocus
-            autoCapitalize="words"
+            autoCapitalize="characters"
             enterKeyHint="done"
             inputMode="text"
             lang="en"
             maxLength={12}
-            pattern="[A-Za-z]*"
+            pattern="[A-Za-z ]*"
             spellCheck="false"
             value={customerText}
             onChange={(event) => setCustomerText(normalizeCustomerName(event.target.value))}

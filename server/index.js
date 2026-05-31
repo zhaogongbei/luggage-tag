@@ -388,16 +388,20 @@ function getPngSize(buffer) {
 
 function normalizeCustomerName(value) {
   return String(value ?? "")
-    .replace(/[^A-Za-z]/g, "")
-    .slice(0, 12);
+    .toUpperCase()
+    .replace(/[^A-Z ]/g, "")
+    .replace(/^ +/g, "")
+    .replace(/ {2,}/g, " ")
+    .slice(0, 12)
+    .trim();
 }
 
 function isValidCustomerName(value) {
-  return /^[A-Za-z]{1,12}$/.test(value);
+  return /^[A-Z]+(?: [A-Z]+)*$/.test(value) && value.length <= 12;
 }
 
 function isValidRawCustomerName(value) {
-  return /^[A-Za-z]{1,12}$/.test(String(value ?? "").trim());
+  return /^[A-Za-z]+(?: [A-Za-z]+)*$/.test(String(value ?? "").trim()) && String(value ?? "").trim().length <= 12;
 }
 
 function toPublicOrder(order) {
