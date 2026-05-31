@@ -1,6 +1,6 @@
 # DIY Luggage Tag MVP
 
-Version: `1.3.0`
+Version: `1.4.0`
 
 现场 DIY 行李牌定制系统 MVP，包含客户定制页、后台订单页、编号设置、订单生成、PNG/PDF 下载和打印状态管理。
 
@@ -13,8 +13,10 @@ npm run dev
 
 默认地址：
 
-- Frontend: http://localhost:5173
-- API: http://localhost:3001
+- Frontend: http://127.0.0.1:5173
+- API: http://127.0.0.1:3001
+
+默认启用私有部署模式：前端和后端只绑定本机 `127.0.0.1`，公网或局域网访问需要显式开启。
 
 ## Features
 
@@ -27,6 +29,39 @@ npm run dev
 - 后台订单列表、打印状态切换、PNG/PDF 下载
 - 后台设置编号前缀、当前编号、编号位数、时间水印开关
 - V1.3 通用智能拼版：A4/A3/A5/自定义纸张、自动计算最优列行、自动旋转优化、裁切线、批量打印
+- V1.4 私有部署和登录门禁：未登录用户默认无法访问任何业务页面，后台支持 Private / Invite / Public / Maintenance 四种模式
+
+## Access Control
+
+默认工作人员账号：
+
+- Username: `admin`
+- Password: `admin123`
+
+生产部署建议使用环境变量覆盖：
+
+```powershell
+$env:LUGGAGE_TAG_STAFF_USER="your-user"
+$env:LUGGAGE_TAG_STAFF_PASSWORD="your-strong-password"
+npm run server
+```
+
+后台访问模式：
+
+- `Private`：默认模式，定制页和后台都需要工作人员登录
+- `Invite`：客户可用邀请码进入定制页，后台仍需工作人员登录
+- `Public`：定制页公开，后台、订单、下载、打印仍需工作人员登录
+- `Maintenance`：维护模式，定制页关闭，仅工作人员可登录后台切回其它模式
+
+如需局域网或公网绑定：
+
+```powershell
+$env:LUGGAGE_TAG_HOST="0.0.0.0"
+npm run server
+npm run client:lan
+```
+
+即使绑定公网，系统仍默认处于 `Private` 模式，必须工作人员登录后才能使用业务页面。
 
 ## Printing
 

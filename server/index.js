@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import crypto from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { jsPDF } from "jspdf";
 
@@ -17,7 +18,16 @@ const dataDir = process.env.LUGGAGE_TAG_DATA_DIR
 const exportDir = path.join(dataDir, "exports");
 const dbPath = path.join(dataDir, "luggage-tag.sqlite");
 const port = Number(process.env.PORT || 3001);
+const host = process.env.LUGGAGE_TAG_HOST || process.env.HOST || "127.0.0.1";
 const execFileAsync = promisify(execFile);
+const sessionCookieName = "luggage_tag_session";
+const inviteCookieName = "luggage_tag_invite";
+const sessionTtlMs = 1000 * 60 * 60 * 12;
+const inviteTtlMs = 1000 * 60 * 60 * 24;
+const staffUsername = process.env.LUGGAGE_TAG_STAFF_USER || "admin";
+const staffPassword = process.env.LUGGAGE_TAG_STAFF_PASSWORD || "admin123";
+const sessions = new Map();
+const invites = new Map();
 
 await fs.mkdir(exportDir, { recursive: true });
 
@@ -46,8 +56,11 @@ const defaultSettings = {
   currentNumber: "1",
   digits: "4",
   watermarkEnabled: "true",
-  selectedPrinter: ""
+  selectedPrinter: "",
+  deploymentMode: "private",
+  inviteCode: ""
 };
+const deploymentModes = ["private", "invite", "public", "maintenance"];
 const templateIds = ["template_01", "template_02", "template_03"];
 const paperPresets = {
   A5: { width: 148, height: 210 },
@@ -72,7 +85,7 @@ for (const [key, value] of Object.entries(defaultSettings)) {
 }
 
 const app = express();
-app.use(cors());
+app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: "12mb" }));
 
 if (process.env.NODE_ENV === "production") {
@@ -87,8 +100,135 @@ async function getSettings() {
     currentNumber: Number(settings.currentNumber ?? defaultSettings.currentNumber),
     digits: Number(settings.digits ?? defaultSettings.digits),
     watermarkEnabled: (settings.watermarkEnabled ?? defaultSettings.watermarkEnabled) === "true",
-    selectedPrinter: settings.selectedPrinter ?? defaultSettings.selectedPrinter
+    selectedPrinter: settings.selectedPrinter ?? defaultSettings.selectedPrinter,
+    deploymentMode: deploymentModes.includes(settings.deploymentMode)
+      ? settings.deploymentMode
+      : defaultSettings.deploymentMode,
+    inviteCode: settings.inviteCode ?? defaultSettings.inviteCode
   };
+}
+
+function toClientSettings(settings) {
+  return {
+    prefix: settings.prefix,
+    currentNumber: settings.currentNumber,
+    digits: settings.digits,
+    watermarkEnabled: settings.watermarkEnabled,
+    deploymentMode: settings.deploymentMode
+  };
+}
+
+function parseCookies(req) {
+  return Object.fromEntries(
+    String(req.headers.cookie ?? "")
+      .split(";")
+      .map((cookie) => cookie.trim())
+      .filter(Boolean)
+      .map((cookie) => {
+        const separatorIndex = cookie.indexOf("=");
+        if (separatorIndex === -1) {
+          return [cookie, ""];
+        }
+        return [
+          decodeURIComponent(cookie.slice(0, separatorIndex)),
+          decodeURIComponent(cookie.slice(separatorIndex + 1))
+        ];
+      })
+  );
+}
+
+function createToken(store, ttlMs) {
+  const token = crypto.randomBytes(32).toString("hex");
+  store.set(token, Date.now() + ttlMs);
+  return token;
+}
+
+function isValidToken(store, token) {
+  const expiresAt = store.get(token);
+  if (!expiresAt) {
+    return false;
+  }
+  if (expiresAt <= Date.now()) {
+    store.delete(token);
+    return false;
+  }
+  return true;
+}
+
+function setSessionCookie(res, token) {
+  res.cookie(sessionCookieName, token, {
+    httpOnly: true,
+    maxAge: sessionTtlMs,
+    sameSite: "lax"
+  });
+}
+
+function setInviteCookie(res, token) {
+  res.cookie(inviteCookieName, token, {
+    httpOnly: true,
+    maxAge: inviteTtlMs,
+    sameSite: "lax"
+  });
+}
+
+function clearAuthCookies(res) {
+  res.clearCookie(sessionCookieName, { sameSite: "lax" });
+  res.clearCookie(inviteCookieName, { sameSite: "lax" });
+}
+
+function isStaffRequest(req) {
+  const cookies = parseCookies(req);
+  return isValidToken(sessions, cookies[sessionCookieName]);
+}
+
+function isInviteRequest(req) {
+  const cookies = parseCookies(req);
+  return isValidToken(invites, cookies[inviteCookieName]);
+}
+
+async function getAccessState(req) {
+  const settings = await getSettings();
+  const authenticated = isStaffRequest(req);
+  const invited = isInviteRequest(req);
+  const customerAccess = authenticated ||
+    settings.deploymentMode === "public" ||
+    (settings.deploymentMode === "invite" && invited);
+  return {
+    authenticated,
+    invited,
+    customerAccess: settings.deploymentMode === "maintenance" ? false : customerAccess,
+    deploymentMode: settings.deploymentMode
+  };
+}
+
+async function requireStaff(req, res, next) {
+  const access = await getAccessState(req);
+  if (!access.authenticated) {
+    return res.status(401).json({ message: "Staff login required", access });
+  }
+  next();
+}
+
+async function requireCustomerAccess(req, res, next) {
+  const access = await getAccessState(req);
+  if (!access.customerAccess) {
+    return res.status(access.deploymentMode === "maintenance" ? 503 : 401).json({
+      message: access.deploymentMode === "maintenance" ? "System is in maintenance mode" : "Login required",
+      access
+    });
+  }
+  next();
+}
+
+async function requireSettingsAccess(req, res, next) {
+  const access = await getAccessState(req);
+  if (!access.customerAccess && !access.authenticated) {
+    return res.status(access.deploymentMode === "maintenance" ? 503 : 401).json({
+      message: access.deploymentMode === "maintenance" ? "System is in maintenance mode" : "Login required",
+      access
+    });
+  }
+  next();
 }
 
 function formatOrderNo(settings) {
@@ -349,36 +489,87 @@ async function createImpositionPdf(orders, rawOptions = {}) {
   return Buffer.from(pdf.output("arraybuffer"));
 }
 
-app.get("/api/settings", async (_req, res) => {
-  res.json(await getSettings());
+app.get("/api/auth/status", async (req, res) => {
+  res.json(await getAccessState(req));
 });
 
-app.put("/api/settings", async (req, res) => {
+app.post("/api/auth/login", async (req, res) => {
+  const username = String(req.body.username ?? "");
+  const password = String(req.body.password ?? "");
+  if (username !== staffUsername || password !== staffPassword) {
+    return res.status(401).json({ message: "账号或密码错误" });
+  }
+  setSessionCookie(res, createToken(sessions, sessionTtlMs));
+  const settings = await getSettings();
+  res.json({
+    authenticated: true,
+    invited: false,
+    customerAccess: settings.deploymentMode !== "maintenance",
+    deploymentMode: settings.deploymentMode
+  });
+});
+
+app.post("/api/auth/invite", async (req, res) => {
+  const settings = await getSettings();
+  const inviteCode = String(req.body.inviteCode ?? "").trim();
+  if (settings.deploymentMode !== "invite" || !settings.inviteCode || inviteCode !== settings.inviteCode) {
+    return res.status(401).json({ message: "邀请码无效" });
+  }
+  setInviteCookie(res, createToken(invites, inviteTtlMs));
+  res.json({
+    authenticated: false,
+    invited: true,
+    customerAccess: true,
+    deploymentMode: settings.deploymentMode
+  });
+});
+
+app.post("/api/auth/logout", async (req, res) => {
+  const cookies = parseCookies(req);
+  sessions.delete(cookies[sessionCookieName]);
+  invites.delete(cookies[inviteCookieName]);
+  clearAuthCookies(res);
+  res.json({ ok: true });
+});
+
+app.get("/api/settings", requireSettingsAccess, async (req, res) => {
+  const settings = await getSettings();
+  res.json({
+    ...toClientSettings(settings),
+    ...(isStaffRequest(req) ? { selectedPrinter: settings.selectedPrinter, inviteCode: settings.inviteCode } : {})
+  });
+});
+
+app.put("/api/settings", requireStaff, async (req, res) => {
   const prefix = String(req.body.prefix ?? "No.").slice(0, 12);
   const currentNumber = Math.max(1, Number.parseInt(req.body.currentNumber, 10) || 1);
   const digits = Math.min(8, Math.max(1, Number.parseInt(req.body.digits, 10) || 4));
   const watermarkEnabled = Boolean(req.body.watermarkEnabled);
   const selectedPrinter = String(req.body.selectedPrinter ?? "").slice(0, 160);
+  const deploymentMode = deploymentModes.includes(req.body.deploymentMode) ? req.body.deploymentMode : "private";
+  const inviteCode = String(req.body.inviteCode ?? "").slice(0, 64);
 
   db.prepare("UPDATE settings SET value = ? WHERE key = 'prefix'").run(prefix);
   db.prepare("UPDATE settings SET value = ? WHERE key = 'currentNumber'").run(String(currentNumber));
   db.prepare("UPDATE settings SET value = ? WHERE key = 'digits'").run(String(digits));
   db.prepare("UPDATE settings SET value = ? WHERE key = 'watermarkEnabled'").run(String(watermarkEnabled));
   db.prepare("UPDATE settings SET value = ? WHERE key = 'selectedPrinter'").run(selectedPrinter);
+  db.prepare("UPDATE settings SET value = ? WHERE key = 'deploymentMode'").run(deploymentMode);
+  db.prepare("UPDATE settings SET value = ? WHERE key = 'inviteCode'").run(inviteCode);
   res.json(await getSettings());
 });
 
-app.get("/api/preview-number", async (_req, res) => {
+app.get("/api/preview-number", requireCustomerAccess, async (_req, res) => {
   const settings = await getSettings();
-  res.json({ orderNo: formatOrderNo(settings), settings });
+  res.json({ orderNo: formatOrderNo(settings), settings: toClientSettings(settings) });
 });
 
-app.get("/api/orders", async (_req, res) => {
+app.get("/api/orders", requireStaff, async (_req, res) => {
   const rows = db.prepare("SELECT * FROM orders ORDER BY id DESC").all();
   res.json(rows.map(toPublicOrder));
 });
 
-app.post("/api/layout/preview", async (req, res) => {
+app.post("/api/layout/preview", requireStaff, async (req, res) => {
   try {
     const layout = computeImpositionLayout(req.body.layoutOptions ?? req.body);
     res.json({
@@ -403,7 +594,7 @@ app.post("/api/layout/preview", async (req, res) => {
   }
 });
 
-app.post("/api/orders/imposition", async (req, res) => {
+app.post("/api/orders/imposition", requireStaff, async (req, res) => {
   const orderIds = parseOrderIds(req.body.orderIds);
   const orders = getOrdersByIds(orderIds);
   if (!orders.length) {
@@ -423,7 +614,7 @@ app.post("/api/orders/imposition", async (req, res) => {
   }
 });
 
-app.post("/api/orders/a4-layout", async (req, res) => {
+app.post("/api/orders/a4-layout", requireStaff, async (req, res) => {
   const orderIds = parseOrderIds(req.body.orderIds);
   const orders = getOrdersByIds(orderIds);
   if (!orders.length) {
@@ -445,13 +636,13 @@ app.post("/api/orders/a4-layout", async (req, res) => {
   }
 });
 
-app.get("/api/orders/batch", async (req, res) => {
+app.get("/api/orders/batch", requireStaff, async (req, res) => {
   const orderIds = parseOrderIds(req.query.ids);
   const orders = getOrdersByIds(orderIds);
   res.json(orders.map(toPublicOrder));
 });
 
-app.get("/api/orders/:id", async (req, res) => {
+app.get("/api/orders/:id", requireStaff, async (req, res) => {
   const order = db.prepare("SELECT * FROM orders WHERE id = ?").get(req.params.id);
   if (!order) {
     return res.status(404).json({ message: "Order not found" });
@@ -459,7 +650,7 @@ app.get("/api/orders/:id", async (req, res) => {
   res.json(toPublicOrder(order));
 });
 
-app.post("/api/orders", async (req, res) => {
+app.post("/api/orders", requireCustomerAccess, async (req, res) => {
   const templateId = String(req.body.templateId ?? "");
   const customerText = normalizeCustomerName(String(req.body.customerText ?? ""));
   const pngDataUrl = String(req.body.pngDataUrl ?? "");
@@ -507,14 +698,14 @@ app.post("/api/orders", async (req, res) => {
   }
 });
 
-app.patch("/api/orders/:id/print-status", async (req, res) => {
+app.patch("/api/orders/:id/print-status", requireStaff, async (req, res) => {
   const status = req.body.printStatus === "printed" ? "printed" : "pending";
   db.prepare("UPDATE orders SET print_status = ? WHERE id = ?").run(status, req.params.id);
   const order = db.prepare("SELECT * FROM orders WHERE id = ?").get(req.params.id);
   res.json(toPublicOrder(order));
 });
 
-app.get("/api/printers", async (_req, res) => {
+app.get("/api/printers", requireStaff, async (_req, res) => {
   try {
     const printers = await getWindowsPrinters();
     const settings = await getSettings();
@@ -529,19 +720,19 @@ app.get("/api/printers", async (_req, res) => {
   }
 });
 
-app.put("/api/printers/selected", async (req, res) => {
+app.put("/api/printers/selected", requireStaff, async (req, res) => {
   const selectedPrinter = String(req.body.selectedPrinter ?? "").slice(0, 160);
   db.prepare("UPDATE settings SET value = ? WHERE key = 'selectedPrinter'").run(selectedPrinter);
   res.json({ selectedPrinter });
 });
 
-app.post("/api/printers/test", async (_req, res) => {
+app.post("/api/printers/test", requireStaff, async (_req, res) => {
   res.status(501).json({
     message: "Local print service is reserved for V2 and is not enabled in browser-print mode."
   });
 });
 
-app.post("/api/orders/:id/print", async (req, res) => {
+app.post("/api/orders/:id/print", requireStaff, async (req, res) => {
   const order = db.prepare("SELECT * FROM orders WHERE id = ?").get(req.params.id);
   if (!order) {
     return res.status(404).json({ message: "Order not found" });
@@ -552,7 +743,7 @@ app.post("/api/orders/:id/print", async (req, res) => {
   });
 });
 
-app.get("/api/orders/:id/download/:type", async (req, res) => {
+app.get("/api/orders/:id/download/:type", requireStaff, async (req, res) => {
   const type = req.params.type;
   if (!["png", "pdf"].includes(type)) {
     return res.status(400).json({ message: "Unsupported download type" });
@@ -565,7 +756,7 @@ app.get("/api/orders/:id/download/:type", async (req, res) => {
   res.download(filePath, `${order.order_no}.${type}`);
 });
 
-app.get("/api/orders/:id/file/:type", async (req, res) => {
+app.get("/api/orders/:id/file/:type", requireStaff, async (req, res) => {
   const type = req.params.type;
   if (!["png", "pdf"].includes(type)) {
     return res.status(400).json({ message: "Unsupported file type" });
@@ -585,6 +776,9 @@ if (process.env.NODE_ENV === "production") {
   });
 }
 
-app.listen(port, () => {
-  console.log(`API server running at http://localhost:${port}`);
+app.listen(port, host, () => {
+  console.log(`API server running at http://${host}:${port}`);
+  if (host === "127.0.0.1" || host === "localhost") {
+    console.log("Private deployment mode: API is bound to localhost only. Set LUGGAGE_TAG_HOST=0.0.0.0 to expose on LAN/public networks.");
+  }
 });

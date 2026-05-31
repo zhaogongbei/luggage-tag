@@ -4,6 +4,8 @@ import {
   CheckCircle2,
   Download,
   Home,
+  LogIn,
+  LogOut,
   Printer,
   RefreshCw,
   Settings,
@@ -12,7 +14,13 @@ import {
 import "./styles.css";
 
 const API_BASE = import.meta.env.DEV ? `${window.location.protocol}//${window.location.hostname}:3001` : "";
-const APP_VERSION = "V1.3.0";
+const APP_VERSION = "V1.4.0";
+const deploymentModes = [
+  { value: "private", label: "Private", description: "仅员工登录后可使用定制页和后台" },
+  { value: "invite", label: "Invite", description: "邀请码可访问定制页，后台仍需员工登录" },
+  { value: "public", label: "Public", description: "定制页公开，后台仍需员工登录" },
+  { value: "maintenance", label: "Maintenance", description: "维护中，仅员工可登录后台切换模式" }
+];
 const paperPresets = {
   A5: { width: 148, height: 210 },
   A4: { width: 210, height: 297 },
@@ -58,6 +66,17 @@ const templates = [
     textColor: "#F7F1E8"
   }
 ];
+
+function apiFetch(path, options = {}) {
+  return fetch(`${API_BASE}${path}`, {
+    credentials: "include",
+    ...options,
+    headers: {
+      ...(options.body && !(options.body instanceof FormData) ? { "Content-Type": "application/json" } : {}),
+      ...(options.headers ?? {})
+    }
+  });
+}
 
 const legacyTemplateNames = {
   classic: "Classic",
@@ -157,7 +176,7 @@ function PrintPage({ orderId }) {
   useEffect(() => {
     async function loadOrder() {
       try {
-        const response = await fetch(`${API_BASE}/api/orders/${orderId}`);
+        const response = await apiFetch(`/api/orders/${orderId}`);
         const data = await response.json();
         if (!response.ok) {
           throw new Error(data.message || "订单不存在");
@@ -243,10 +262,9 @@ function ImpositionPrintPage({ orderIds, layoutOptions }) {
     async function loadPrintData() {
       try {
         const [ordersResponse, layoutResponse] = await Promise.all([
-          fetch(`${API_BASE}/api/orders/batch?ids=${orderIds.join(",")}`),
-          fetch(`${API_BASE}/api/layout/preview`, {
+          apiFetch(`/api/orders/batch?ids=${orderIds.join(",")}`),
+          apiFetch(`/api/layout/preview`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ layoutOptions: normalizeLayoutOptions(layoutOptions) })
           })
         ]);
@@ -372,9 +390,8 @@ function CustomerPage({ settings, previewNumber, onCreated }) {
     setMessage("");
     try {
       const pngDataUrl = canvasRef.current.toDataURL("image/png");
-      const response = await fetch(`${API_BASE}/api/orders`, {
+      const response = await apiFetch("/api/orders", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ templateId, customerText: normalizedName, pngDataUrl })
       });
       const data = await response.json();
@@ -449,6 +466,116 @@ function CustomerPage({ settings, previewNumber, onCreated }) {
   );
 }
 
+function AccessGate({ access, onAuthenticated }) {
+  const [loginForm, setLoginForm] = useState({ username: "admin", password: "" });
+  const [inviteCode, setInviteCode] = useState("");
+  const [message, setMessage] = useState("");
+  const isMaintenance = access?.deploymentMode === "maintenance";
+
+  async function login(event) {
+    event.preventDefault();
+    setMessage("");
+    const response = await apiFetch("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify(loginForm)
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      setMessage(data.message || "登录失败");
+      return;
+    }
+    onAuthenticated(data);
+  }
+
+  async function enterInvite(event) {
+    event.preventDefault();
+    setMessage("");
+    const response = await apiFetch("/api/auth/invite", {
+      method: "POST",
+      body: JSON.stringify({ inviteCode })
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      setMessage(data.message || "邀请码无效");
+      return;
+    }
+    onAuthenticated(data);
+  }
+
+  return (
+    <main className="access-page">
+      <section className="panel access-panel">
+        <div className="section-title">
+          <LogIn size={20} />
+          <span>{isMaintenance ? "系统维护中" : "工作人员登录"}</span>
+        </div>
+        <p className="access-copy">
+          当前模式：{deploymentModes.find((mode) => mode.value === access?.deploymentMode)?.label ?? "Private"}。
+          未登录用户无法访问业务页面。
+        </p>
+        <form className="access-form" onSubmit={login}>
+          <label className="field">
+            <span>账号</span>
+            <input
+              autoComplete="username"
+              value={loginForm.username}
+              onChange={(event) => setLoginForm({ ...loginForm, username: event.target.value })}
+            />
+          </label>
+          <label className="field">
+            <span>密码</span>
+            <input
+              autoComplete="current-password"
+              type="password"
+              value={loginForm.password}
+              onChange={(event) => setLoginForm({ ...loginForm, password: event.target.value })}
+            />
+          </label>
+          <button className="primary-btn" type="submit">
+            <LogIn size={18} />
+            登录后台
+          </button>
+        </form>
+        {access?.deploymentMode === "invite" && (
+          <form className="access-form invite-form" onSubmit={enterInvite}>
+            <label className="field">
+              <span>客户邀请码</span>
+              <input value={inviteCode} onChange={(event) => setInviteCode(event.target.value)} />
+            </label>
+            <button className="secondary-btn" type="submit">进入定制页</button>
+          </form>
+        )}
+        {message && <p className="message">{message}</p>}
+        <p className="field-hint">默认账号为环境变量 `LUGGAGE_TAG_STAFF_USER`，默认密码为 `LUGGAGE_TAG_STAFF_PASSWORD`。</p>
+      </section>
+    </main>
+  );
+}
+
+function StaffOnlyPage({ children }) {
+  const [access, setAccess] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function loadAccess() {
+      const response = await apiFetch("/api/auth/status");
+      setAccess(await response.json());
+      setLoading(false);
+    }
+    loadAccess();
+  }, []);
+
+  if (loading) {
+    return <main className="access-page"><p className="message neutral">Loading...</p></main>;
+  }
+
+  if (!access?.authenticated) {
+    return <AccessGate access={access} onAuthenticated={setAccess} />;
+  }
+
+  return children;
+}
+
 function AdminPage({ settings, onSettingsSaved }) {
   const [orders, setOrders] = useState([]);
   const [form, setForm] = useState(settings);
@@ -463,14 +590,14 @@ function AdminPage({ settings, onSettingsSaved }) {
   }, [settings]);
 
   async function loadOrders() {
-    const response = await fetch(`${API_BASE}/api/orders`);
+    const response = await apiFetch("/api/orders");
     const nextOrders = await response.json();
     setOrders(nextOrders);
     setSelectedOrderIds((ids) => ids.filter((id) => nextOrders.some((order) => order.id === id)));
   }
 
   async function loadPrinters() {
-    const response = await fetch(`${API_BASE}/api/printers`);
+    const response = await apiFetch("/api/printers");
     const data = await response.json();
     setPrinterState({
       printers: data.printers ?? [],
@@ -487,9 +614,8 @@ function AdminPage({ settings, onSettingsSaved }) {
   useEffect(() => {
     async function loadLayoutPreview() {
       try {
-        const response = await fetch(`${API_BASE}/api/layout/preview`, {
+        const response = await apiFetch("/api/layout/preview", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ layoutOptions: normalizeLayoutOptions(layoutOptions) })
         });
         const data = await response.json();
@@ -502,18 +628,16 @@ function AdminPage({ settings, onSettingsSaved }) {
   }, [layoutOptions]);
 
   async function saveSettings() {
-    const response = await fetch(`${API_BASE}/api/settings`, {
+    const response = await apiFetch("/api/settings", {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(form)
     });
     onSettingsSaved(await response.json());
   }
 
   async function togglePrinted(order) {
-    await fetch(`${API_BASE}/api/orders/${order.id}/print-status`, {
+    await apiFetch(`/api/orders/${order.id}/print-status`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         printStatus: order.print_status === "printed" ? "pending" : "printed"
       })
@@ -553,9 +677,8 @@ function AdminPage({ settings, onSettingsSaved }) {
       setPrinterMessage("请先选择订单");
       return;
     }
-    const response = await fetch(`${API_BASE}/api/orders/imposition`, {
+    const response = await apiFetch("/api/orders/imposition", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         orderIds: selectedOrderIds,
         layoutOptions: normalizeLayoutOptions(layoutOptions)
@@ -592,16 +715,15 @@ function AdminPage({ settings, onSettingsSaved }) {
 
   async function saveSelectedPrinter(selectedPrinter) {
     setPrinterState({ ...printerState, selectedPrinter });
-    await fetch(`${API_BASE}/api/printers/selected`, {
+    await apiFetch("/api/printers/selected", {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ selectedPrinter })
     });
     setPrinterMessage("打印机选择已保存");
   }
 
   async function testPrinter() {
-    const response = await fetch(`${API_BASE}/api/printers/test`, { method: "POST" });
+    const response = await apiFetch("/api/printers/test", { method: "POST" });
     const data = await response.json();
     setPrinterMessage(data.message || (response.ok ? "测试打印已发送" : "测试打印暂不可用"));
   }
@@ -649,6 +771,42 @@ function AdminPage({ settings, onSettingsSaved }) {
         <button className="secondary-btn" onClick={saveSettings} type="button">
           <CheckCircle2 size={18} />
           保存设置
+        </button>
+      </section>
+
+      <section className="panel access-settings-panel">
+        <div className="section-title">
+          <LogIn size={20} />
+          <span>访问模式</span>
+        </div>
+        <div className="settings-grid access-settings-grid">
+          <label className="field">
+            <span>部署模式</span>
+            <select
+              value={form.deploymentMode ?? "private"}
+              onChange={(event) => setForm({ ...form, deploymentMode: event.target.value })}
+            >
+              {deploymentModes.map((mode) => (
+                <option key={mode.value} value={mode.value}>{mode.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            <span>邀请码</span>
+            <input
+              disabled={(form.deploymentMode ?? "private") !== "invite"}
+              value={form.inviteCode ?? ""}
+              onChange={(event) => setForm({ ...form, inviteCode: event.target.value })}
+              placeholder="Invite 模式下填写"
+            />
+          </label>
+          <div className="mode-help">
+            {deploymentModes.find((mode) => mode.value === (form.deploymentMode ?? "private"))?.description}
+          </div>
+        </div>
+        <button className="secondary-btn" onClick={saveSettings} type="button">
+          <CheckCircle2 size={18} />
+          保存访问模式
         </button>
       </section>
 
@@ -856,30 +1014,77 @@ function App() {
   const printMatch = window.location.pathname.match(/^\/print\/(\d+)$/);
   const impositionPrintMatch = window.location.pathname === "/print-layout" || window.location.pathname === "/print-a4";
   const [page, setPage] = useState("customer");
-  const [settings, setSettings] = useState({ prefix: "No.", currentNumber: 1, digits: 4, watermarkEnabled: true });
+  const [access, setAccess] = useState(null);
+  const [settings, setSettings] = useState({
+    prefix: "No.",
+    currentNumber: 1,
+    digits: 4,
+    watermarkEnabled: true,
+    deploymentMode: "private"
+  });
   const [previewNumber, setPreviewNumber] = useState("No.0001");
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
 
   async function loadState() {
+    setLoadError("");
     const [settingsResponse, numberResponse] = await Promise.all([
-      fetch(`${API_BASE}/api/settings`),
-      fetch(`${API_BASE}/api/preview-number`)
+      apiFetch("/api/settings"),
+      apiFetch("/api/preview-number")
     ]);
+    if (!settingsResponse.ok || !numberResponse.ok) {
+      const data = await settingsResponse.json().catch(() => ({}));
+      throw new Error(data.message || "当前模式下无法访问定制页");
+    }
     setSettings(await settingsResponse.json());
     const numberData = await numberResponse.json();
     setPreviewNumber(numberData.orderNo);
   }
 
+  async function loadAccessAndState() {
+    setLoading(true);
+    try {
+      const response = await apiFetch("/api/auth/status");
+      const nextAccess = await response.json();
+      setAccess(nextAccess);
+      if (nextAccess.customerAccess) {
+        await loadState();
+      } else if (nextAccess.authenticated) {
+        const settingsResponse = await apiFetch("/api/settings");
+        if (settingsResponse.ok) {
+          setSettings(await settingsResponse.json());
+        }
+        setPage("admin");
+      }
+    } catch (error) {
+      setLoadError(error.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   useEffect(() => {
-    loadState();
+    loadAccessAndState();
   }, []);
 
   function handleSettingsSaved(nextSettings) {
     setSettings(nextSettings);
-    loadState();
+    loadAccessAndState();
+  }
+
+  async function logout() {
+    await apiFetch("/api/auth/logout", { method: "POST" });
+    setPage("customer");
+    setAccess(null);
+    loadAccessAndState();
   }
 
   if (printMatch) {
-    return <PrintPage orderId={printMatch[1]} />;
+    return (
+      <StaffOnlyPage>
+        <PrintPage orderId={printMatch[1]} />
+      </StaffOnlyPage>
+    );
   }
 
   if (impositionPrintMatch) {
@@ -894,7 +1099,32 @@ function App() {
         layoutOptions = defaultLayoutOptions;
       }
     }
-    return <ImpositionPrintPage orderIds={orderIds} layoutOptions={layoutOptions} />;
+    return (
+      <StaffOnlyPage>
+        <ImpositionPrintPage orderIds={orderIds} layoutOptions={layoutOptions} />
+      </StaffOnlyPage>
+    );
+  }
+
+  if (loading) {
+    return <main className="access-page"><p className="message neutral">Loading...</p></main>;
+  }
+
+  if (!access?.customerAccess && !access?.authenticated) {
+    return <AccessGate access={access} onAuthenticated={(nextAccess) => {
+      setAccess(nextAccess);
+      loadAccessAndState();
+    }} />;
+  }
+
+  const customerDisabled = !access?.customerAccess;
+  const activePage = customerDisabled && page === "customer" ? "admin" : page;
+
+  if (activePage === "admin" && !access?.authenticated) {
+    return <AccessGate access={access} onAuthenticated={(nextAccess) => {
+      setAccess(nextAccess);
+      loadAccessAndState();
+    }} />;
   }
 
   return (
@@ -908,17 +1138,29 @@ function App() {
           </div>
         </div>
         <nav>
-          <button className={page === "customer" ? "active" : ""} onClick={() => setPage("customer")} type="button">
+          <button
+            className={activePage === "customer" ? "active" : ""}
+            disabled={customerDisabled}
+            onClick={() => setPage("customer")}
+            type="button"
+          >
             <Home size={18} />
             定制页
           </button>
-          <button className={page === "admin" ? "active" : ""} onClick={() => setPage("admin")} type="button">
+          <button className={activePage === "admin" ? "active" : ""} onClick={() => setPage("admin")} type="button">
             <Settings size={18} />
             后台
           </button>
+          {access?.authenticated && (
+            <button onClick={logout} type="button">
+              <LogOut size={18} />
+              退出
+            </button>
+          )}
         </nav>
       </header>
-      {page === "customer" ? (
+      {loadError && <p className="message app-message">{loadError}</p>}
+      {activePage === "customer" ? (
         <CustomerPage
           onCreated={loadState}
           previewNumber={previewNumber}

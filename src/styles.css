@@ -120,6 +120,46 @@ nav button.active,
   color: white;
 }
 
+nav button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.app-message {
+  padding: 14px 34px 0;
+}
+
+.access-page {
+  align-items: center;
+  display: flex;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 24px;
+}
+
+.access-panel {
+  max-width: 460px;
+  width: 100%;
+}
+
+.access-copy {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.6;
+  margin-bottom: 18px;
+}
+
+.access-form {
+  display: grid;
+  gap: 14px;
+}
+
+.invite-form {
+  border-top: 1px solid var(--line);
+  margin-top: 18px;
+  padding-top: 18px;
+}
+
 .workspace {
   display: grid;
   gap: 34px;
@@ -325,6 +365,14 @@ input[type="checkbox"] {
   color: var(--muted);
   font-size: 13px;
   font-weight: 600;
+}
+
+.mode-help {
+  align-self: end;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 12px 0;
 }
 
 .toggle {
@@ -549,6 +597,10 @@ th {
   }
 
   .layout-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .access-settings-grid {
     grid-template-columns: 1fr;
   }
 }
