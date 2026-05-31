@@ -1,6 +1,6 @@
 # DIY Luggage Tag MVP
 
-Version: `1.4.0`
+Version: `1.4.1`
 
 现场 DIY 行李牌定制系统 MVP，包含客户定制页、后台订单页、编号设置、订单生成、PNG/PDF 下载和打印状态管理。
 
