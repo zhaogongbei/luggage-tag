@@ -14,7 +14,7 @@ import {
 import "./styles.css";
 
 const API_BASE = import.meta.env.DEV ? `${window.location.protocol}//${window.location.hostname}:3001` : "";
-const APP_VERSION = "V1.4.2";
+const APP_VERSION = "V1.4.3";
 const deploymentModes = [
   { value: "private", label: "Private", description: "仅员工登录后可使用定制页和后台" },
   { value: "invite", label: "Invite", description: "邀请码可访问定制页，后台仍需员工登录" },
@@ -162,6 +162,16 @@ function CanvasPreview({ template, customerText, orderNo, watermarkEnabled, time
   return <canvas className="tag-canvas" ref={canvasRef} />;
 }
 
+function TicketPrint({ order }) {
+  return (
+    <div className="ticket-print">
+      <strong className="ticket-name">{order.customer_text}</strong>
+      <span className="ticket-no">{order.order_no}</span>
+      <time className="ticket-time">{formatDateTime(order.generated_at)}</time>
+    </div>
+  );
+}
+
 function PrintPage({ orderId }) {
   const [order, setOrder] = useState(null);
   const [error, setError] = useState("");
@@ -188,6 +198,14 @@ function PrintPage({ orderId }) {
     }
     loadOrder();
   }, [orderId]);
+
+  useEffect(() => {
+    if (order) {
+      const timer = window.setTimeout(() => window.print(), 350);
+      return () => window.clearTimeout(timer);
+    }
+    return undefined;
+  }, [order]);
 
   function printNow() {
     window.print();
@@ -222,11 +240,7 @@ function PrintPage({ orderId }) {
         </button>
       </div>
       <section className="print-sheet">
-        <img
-          alt={order.order_no}
-          onLoad={() => window.setTimeout(() => window.print(), 350)}
-          src={`${API_BASE}/api/orders/${order.id}/file/png`}
-        />
+        <TicketPrint order={order} />
       </section>
     </main>
   );
@@ -349,17 +363,7 @@ function ImpositionPrintPage({ orderIds, layoutOptions }) {
                     width: `${layout.productWidth}mm`
                   }}
                 >
-                  <img
-                    alt={order.order_no}
-                    src={`${API_BASE}/api/orders/${order.id}/file/png`}
-                    style={layout.autoRotated ? {
-                      height: `${layout.productWidth}mm`,
-                      width: `${layout.productHeight}mm`
-                    } : {
-                      height: `${layout.productHeight}mm`,
-                      width: `${layout.productWidth}mm`
-                    }}
-                  />
+                  <TicketPrint order={order} />
                 </div>
                 {layout.showOrderNo && <figcaption>{order.order_no}</figcaption>}
               </figure>

@@ -421,17 +421,52 @@ async function getWindowsPrinters() {
   }));
 }
 
-async function createPdfFromPng(orderNo, pngDataUrl, outputPath) {
-  const { width, height } = getPngSize(imageDataToBuffer(pngDataUrl));
+function formatTicketDateTime(value) {
+  return new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    timeZone: "Asia/Shanghai"
+  }).format(new Date(value));
+}
+
+function drawTicket(pdf, order, x, y, width, height) {
+  pdf.setFillColor(255, 255, 255);
+  pdf.rect(x, y, width, height, "F");
+  pdf.setTextColor(0, 0, 0);
+  pdf.setFont("helvetica", "bold");
+  pdf.setFontSize(Math.min(26, width * 0.24));
+  pdf.text(order.customer_text, x + width / 2, y + height * 0.43, {
+    align: "center",
+    maxWidth: width * 0.84
+  });
+  pdf.setFont("helvetica", "normal");
+  pdf.setFontSize(Math.min(12, width * 0.12));
+  pdf.text(order.order_no, x + width / 2, y + height * 0.57, { align: "center" });
+  pdf.setFontSize(Math.min(8, width * 0.08));
+  pdf.text(formatTicketDateTime(order.generated_at), x + width / 2, y + height * 0.66, { align: "center" });
+}
+
+async function createTicketPdf(order, outputPath) {
+  const pdfBuffer = createTicketPdfBuffer(order);
+  await fs.writeFile(outputPath, pdfBuffer);
+}
+
+function createTicketPdfBuffer(order) {
+  const width = 70;
+  const height = 110;
   const pdf = new jsPDF({
-    orientation: width >= height ? "landscape" : "portrait",
-    unit: "px",
+    orientation: "portrait",
+    unit: "mm",
     format: [width, height],
     compress: true
   });
-  pdf.addImage(pngDataUrl, "PNG", 0, 0, width, height);
-  pdf.setProperties({ title: `Luggage Tag ${orderNo}` });
-  await fs.writeFile(outputPath, Buffer.from(pdf.output("arraybuffer")));
+  drawTicket(pdf, order, 0, 0, width, height);
+  pdf.setProperties({ title: `Luggage Tag Ticket ${order.order_no}` });
+  return Buffer.from(pdf.output("arraybuffer"));
 }
 
 function drawCropMarks(pdf, x, y, width, height) {
@@ -466,14 +501,7 @@ async function createImpositionPdf(orders, rawOptions = {}) {
     const position = layout.positions[index % layout.capacity];
     const x = position.x;
     const y = position.y;
-    const imageBuffer = await fs.readFile(order.png_path);
-    const imageData = `data:image/png;base64,${imageBuffer.toString("base64")}`;
-
-    if (layout.itemRotated) {
-      pdf.addImage(imageData, "PNG", x, y + layout.itemHeight, layout.itemHeight, layout.itemWidth, undefined, "FAST", 90);
-    } else {
-      pdf.addImage(imageData, "PNG", x, y, layout.itemWidth, layout.itemHeight);
-    }
+    drawTicket(pdf, order, x, y, layout.itemWidth, layout.itemHeight);
     if (layout.cropMarks) {
       drawCropMarks(pdf, x, y, layout.itemWidth, layout.itemHeight);
     }
@@ -672,7 +700,7 @@ app.post("/api/orders", requireCustomerAccess, async (req, res) => {
     const pdfPath = path.join(exportDir, `${safeName}.pdf`);
 
     await fs.writeFile(pngPath, imageDataToBuffer(pngDataUrl));
-    await createPdfFromPng(orderNo, pngDataUrl, pdfPath);
+    await createTicketPdf({ order_no: orderNo, customer_text: customerText, generated_at: generatedAt }, pdfPath);
     db.prepare(
       `INSERT INTO orders (order_no, template_id, customer_text, generated_at, print_status, png_path, pdf_path)
        VALUES (?, ?, ?, ?, 'pending', ?, ?)`
@@ -752,8 +780,13 @@ app.get("/api/orders/:id/download/:type", requireStaff, async (req, res) => {
   if (!order) {
     return res.status(404).json({ message: "Order not found" });
   }
-  const filePath = type === "png" ? order.png_path : order.pdf_path;
-  res.download(filePath, `${order.order_no}.${type}`);
+  if (type === "pdf") {
+    const pdfBuffer = createTicketPdfBuffer(order);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${order.order_no}.pdf"`);
+    return res.send(pdfBuffer);
+  }
+  res.download(order.png_path, `${order.order_no}.png`);
 });
 
 app.get("/api/orders/:id/file/:type", requireStaff, async (req, res) => {
@@ -765,7 +798,11 @@ app.get("/api/orders/:id/file/:type", requireStaff, async (req, res) => {
   if (!order) {
     return res.status(404).json({ message: "Order not found" });
   }
-  const filePath = type === "png" ? order.png_path : order.pdf_path;
+  if (type === "pdf") {
+    res.type("pdf");
+    return res.send(createTicketPdfBuffer(order));
+  }
+  const filePath = order.png_path;
   res.type(type);
   res.sendFile(filePath);
 });

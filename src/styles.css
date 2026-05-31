@@ -505,6 +505,38 @@ th {
   width: auto;
 }
 
+.ticket-print {
+  align-items: center;
+  background: #ffffff;
+  color: #000000;
+  display: flex;
+  flex-direction: column;
+  font-family: Helvetica, Arial, sans-serif;
+  height: 11cm;
+  justify-content: center;
+  line-height: 1.2;
+  text-align: center;
+  width: 7cm;
+}
+
+.ticket-name {
+  font-size: 28pt;
+  font-weight: 700;
+  max-width: 84%;
+  overflow-wrap: anywhere;
+}
+
+.ticket-no {
+  font-size: 14pt;
+  font-weight: 600;
+  margin-top: 8mm;
+}
+
+.ticket-time {
+  font-size: 9pt;
+  margin-top: 5mm;
+}
+
 .imposition-print-shell {
   align-items: center;
   background: #dfe4dc;
@@ -532,6 +564,7 @@ th {
 }
 
 .imposition-frame {
+  background: #ffffff;
   border: 0.2mm solid #111111;
   overflow: hidden;
   position: relative;
@@ -541,17 +574,9 @@ th {
   border: none;
 }
 
-.imposition-frame img {
-  display: block;
-  object-fit: contain;
-}
-
-.imposition-tag.rotated .imposition-frame img {
-  left: 0;
-  position: absolute;
-  top: 100%;
-  transform: rotate(-90deg);
-  transform-origin: top left;
+.imposition-frame .ticket-print {
+  height: 100%;
+  width: 100%;
 }
 
 .imposition-tag figcaption {
@@ -629,11 +654,10 @@ th {
     display: block;
   }
 
-  .print-sheet img {
+  .print-sheet .ticket-print {
     height: 11cm;
     max-height: none;
     max-width: none;
-    object-fit: contain;
     width: 7cm;
   }
 
