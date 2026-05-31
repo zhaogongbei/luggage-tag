@@ -12,6 +12,15 @@ import {
 import "./styles.css";
 
 const API_BASE = import.meta.env.DEV ? `${window.location.protocol}//${window.location.hostname}:3001` : "";
+const APP_VERSION = "V1.2.0";
+const a4Layout = {
+  pageWidth: 210,
+  pageHeight: 297,
+  tagWidth: 70,
+  tagHeight: 110,
+  columns: 2,
+  rows: 2
+};
 
 const templates = [
   {
@@ -129,6 +138,13 @@ function PrintPage({ orderId }) {
   const [error, setError] = useState("");
 
   useEffect(() => {
+    const style = document.createElement("style");
+    style.textContent = "@page { size: 7cm 11cm; margin: 0; }";
+    document.head.appendChild(style);
+    return () => style.remove();
+  }, []);
+
+  useEffect(() => {
     async function loadOrder() {
       try {
         const response = await fetch(`${API_BASE}/api/orders/${orderId}`);
@@ -183,6 +199,105 @@ function PrintPage({ orderId }) {
           src={`${API_BASE}/api/orders/${order.id}/file/png`}
         />
       </section>
+    </main>
+  );
+}
+
+function chunkOrders(orders) {
+  const pages = [];
+  for (let index = 0; index < orders.length; index += 4) {
+    pages.push(orders.slice(index, index + 4));
+  }
+  return pages;
+}
+
+function getA4Position(index) {
+  const horizontalGap = (a4Layout.pageWidth - a4Layout.columns * a4Layout.tagWidth) / (a4Layout.columns + 1);
+  const verticalGap = (a4Layout.pageHeight - a4Layout.rows * a4Layout.tagHeight) / (a4Layout.rows + 1);
+  const position = index % 4;
+  const column = position % a4Layout.columns;
+  const row = Math.floor(position / a4Layout.columns);
+  return {
+    left: horizontalGap + column * (a4Layout.tagWidth + horizontalGap),
+    top: verticalGap + row * (a4Layout.tagHeight + verticalGap)
+  };
+}
+
+function A4PrintPage({ orderIds }) {
+  const [orders, setOrders] = useState([]);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const style = document.createElement("style");
+    style.textContent = "@page { size: A4 portrait; margin: 0; }";
+    document.head.appendChild(style);
+    return () => style.remove();
+  }, []);
+
+  useEffect(() => {
+    async function loadOrders() {
+      try {
+        const response = await fetch(`${API_BASE}/api/orders/batch?ids=${orderIds.join(",")}`);
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.message || "无法加载拼版订单");
+        }
+        setOrders(data);
+      } catch (loadError) {
+        setError(loadError.message);
+      }
+    }
+    loadOrders();
+  }, [orderIds]);
+
+  useEffect(() => {
+    if (orders.length) {
+      const timer = window.setTimeout(() => window.print(), 600);
+      return () => window.clearTimeout(timer);
+    }
+    return undefined;
+  }, [orders]);
+
+  if (error) {
+    return (
+      <main className="a4-print-shell">
+        <p className="message">{error}</p>
+      </main>
+    );
+  }
+
+  return (
+    <main className="a4-print-shell">
+      <div className="print-toolbar a4-toolbar">
+        <div>
+          <strong>A4 拼版打印</strong>
+          <span>{orders.length ? `${orders.length} 个订单` : "Loading..."}</span>
+        </div>
+        <button className="primary-btn compact" onClick={() => window.print()} type="button">
+          <Printer size={18} />
+          打印
+        </button>
+      </div>
+      {chunkOrders(orders).map((pageOrders, pageIndex) => (
+        <section className="a4-page" key={pageIndex}>
+          {pageOrders.map((order, orderIndex) => {
+            const position = getA4Position(orderIndex);
+            return (
+              <figure
+                className="a4-tag"
+                key={order.id}
+                style={{
+                  left: `${position.left}mm`,
+                  top: `${position.top}mm`
+                }}
+              >
+                <img alt={order.order_no} src={`${API_BASE}/api/orders/${order.id}/file/png`} />
+                <figcaption>{order.order_no}</figcaption>
+              </figure>
+            );
+          })}
+        </section>
+      ))}
     </main>
   );
 }
@@ -288,6 +403,7 @@ function AdminPage({ settings, onSettingsSaved }) {
   const [form, setForm] = useState(settings);
   const [printerState, setPrinterState] = useState({ printers: [], defaultPrinter: "", selectedPrinter: "" });
   const [printerMessage, setPrinterMessage] = useState("");
+  const [selectedOrderIds, setSelectedOrderIds] = useState([]);
 
   useEffect(() => {
     setForm(settings);
@@ -295,7 +411,9 @@ function AdminPage({ settings, onSettingsSaved }) {
 
   async function loadOrders() {
     const response = await fetch(`${API_BASE}/api/orders`);
-    setOrders(await response.json());
+    const nextOrders = await response.json();
+    setOrders(nextOrders);
+    setSelectedOrderIds((ids) => ids.filter((id) => nextOrders.some((order) => order.id === id)));
   }
 
   async function loadPrinters() {
@@ -335,6 +453,53 @@ function AdminPage({ settings, onSettingsSaved }) {
 
   function openPrintPreview(order) {
     window.open(`/print/${order.id}`, "_blank", "noopener,noreferrer");
+  }
+
+  function toggleOrderSelection(orderId) {
+    setSelectedOrderIds((ids) => (
+      ids.includes(orderId) ? ids.filter((id) => id !== orderId) : [...ids, orderId]
+    ));
+  }
+
+  function toggleAllPendingOrders() {
+    const pendingIds = orders.filter((order) => order.print_status !== "printed").map((order) => order.id);
+    const allSelected = pendingIds.length > 0 && pendingIds.every((id) => selectedOrderIds.includes(id));
+    setSelectedOrderIds(allSelected ? [] : pendingIds);
+  }
+
+  async function downloadA4LayoutPdf() {
+    if (!selectedOrderIds.length) {
+      setPrinterMessage("请先选择订单");
+      return;
+    }
+    const response = await fetch(`${API_BASE}/api/orders/a4-layout`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ orderIds: selectedOrderIds, showOrderNo: true })
+    });
+    if (!response.ok) {
+      const data = await response.json();
+      setPrinterMessage(data.message || "A4 拼版 PDF 生成失败");
+      return;
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `a4-layout-${Date.now()}.pdf`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+    setPrinterMessage("A4 拼版 PDF 已生成");
+  }
+
+  function openA4PrintPage() {
+    if (!selectedOrderIds.length) {
+      setPrinterMessage("请先选择订单");
+      return;
+    }
+    window.open(`/print-a4?ids=${selectedOrderIds.join(",")}`, "_blank", "noopener,noreferrer");
   }
 
   async function saveSelectedPrinter(selectedPrinter) {
@@ -438,14 +603,36 @@ function AdminPage({ settings, onSettingsSaved }) {
       <section className="panel orders-panel">
         <div className="section-title split">
           <span>订单列表</span>
-          <button className="icon-btn" onClick={loadOrders} title="刷新" type="button">
-            <RefreshCw size={18} />
-          </button>
+          <div className="order-toolbar">
+            <strong>{selectedOrderIds.length} 已选</strong>
+            <button className="secondary-btn inline" onClick={downloadA4LayoutPdf} type="button">
+              <Download size={18} />
+              生成A4拼版PDF
+            </button>
+            <button className="secondary-btn inline" onClick={openA4PrintPage} type="button">
+              <Printer size={18} />
+              A4拼版打印
+            </button>
+            <button className="icon-btn" onClick={loadOrders} title="刷新" type="button">
+              <RefreshCw size={18} />
+            </button>
+          </div>
         </div>
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
+                <th>
+                  <input
+                    aria-label="选择所有待打印订单"
+                    checked={
+                      orders.some((order) => order.print_status !== "printed") &&
+                      orders.filter((order) => order.print_status !== "printed").every((order) => selectedOrderIds.includes(order.id))
+                    }
+                    onChange={toggleAllPendingOrders}
+                    type="checkbox"
+                  />
+                </th>
                 <th>编号</th>
                 <th>客户文字</th>
                 <th>模板</th>
@@ -457,6 +644,14 @@ function AdminPage({ settings, onSettingsSaved }) {
             <tbody>
               {orders.map((order) => (
                 <tr key={order.id}>
+                  <td>
+                    <input
+                      aria-label={`选择 ${order.order_no}`}
+                      checked={selectedOrderIds.includes(order.id)}
+                      onChange={() => toggleOrderSelection(order.id)}
+                      type="checkbox"
+                    />
+                  </td>
                   <td>{order.order_no}</td>
                   <td>{order.customer_text}</td>
                   <td>{templates.find((item) => item.id === order.template_id)?.displayName ?? legacyTemplateNames[order.template_id] ?? order.template_id}</td>
@@ -484,7 +679,7 @@ function AdminPage({ settings, onSettingsSaved }) {
               ))}
               {!orders.length && (
                 <tr>
-                  <td colSpan="6" className="empty">
+                  <td colSpan="7" className="empty">
                     暂无订单
                   </td>
                 </tr>
@@ -499,6 +694,7 @@ function AdminPage({ settings, onSettingsSaved }) {
 
 function App() {
   const printMatch = window.location.pathname.match(/^\/print\/(\d+)$/);
+  const a4PrintMatch = window.location.pathname === "/print-a4";
   const [page, setPage] = useState("customer");
   const [settings, setSettings] = useState({ prefix: "No.", currentNumber: 1, digits: 4, watermarkEnabled: true });
   const [previewNumber, setPreviewNumber] = useState("No.0001");
@@ -526,6 +722,11 @@ function App() {
     return <PrintPage orderId={printMatch[1]} />;
   }
 
+  if (a4PrintMatch) {
+    const orderIds = new URLSearchParams(window.location.search).get("ids")?.split(",").map(Number).filter(Boolean) ?? [];
+    return <A4PrintPage orderIds={orderIds} />;
+  }
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -533,7 +734,7 @@ function App() {
           <span className="brand-mark">K</span>
           <div>
             <h1>DIY 行李牌现场定制</h1>
-            <p>客户定制 / 订单后台 / 文件导出</p>
+            <p>客户定制 / 订单后台 / 文件导出 / {APP_VERSION}</p>
           </div>
         </div>
         <nav>

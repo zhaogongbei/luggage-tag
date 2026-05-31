@@ -49,6 +49,14 @@ const defaultSettings = {
   selectedPrinter: ""
 };
 const templateIds = ["template_01", "template_02", "template_03"];
+const a4Layout = {
+  pageWidth: 210,
+  pageHeight: 297,
+  tagWidth: 70,
+  tagHeight: 110,
+  columns: 2,
+  rows: 2
+};
 
 for (const [key, value] of Object.entries(defaultSettings)) {
   db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)").run(key, value);
@@ -117,6 +125,23 @@ function toPublicOrder(order) {
   };
 }
 
+function parseOrderIds(value) {
+  const rawIds = Array.isArray(value) ? value : String(value ?? "").split(",");
+  return rawIds
+    .map((id) => Number.parseInt(id, 10))
+    .filter((id, index, ids) => Number.isInteger(id) && id > 0 && ids.indexOf(id) === index);
+}
+
+function getOrdersByIds(orderIds) {
+  if (!orderIds.length) {
+    return [];
+  }
+  const placeholders = orderIds.map(() => "?").join(",");
+  const rows = db.prepare(`SELECT * FROM orders WHERE id IN (${placeholders})`).all(...orderIds);
+  const byId = new Map(rows.map((order) => [order.id, order]));
+  return orderIds.map((id) => byId.get(id)).filter(Boolean);
+}
+
 async function getWindowsPrinters() {
   if (process.platform !== "win32") {
     return [];
@@ -150,6 +175,56 @@ async function createPdfFromPng(orderNo, pngDataUrl, outputPath) {
   await fs.writeFile(outputPath, Buffer.from(pdf.output("arraybuffer")));
 }
 
+async function createA4LayoutPdf(orders, { showOrderNo = true } = {}) {
+  const pdf = new jsPDF({
+    orientation: "portrait",
+    unit: "mm",
+    format: "a4",
+    compress: true
+  });
+  const horizontalGap = (a4Layout.pageWidth - a4Layout.columns * a4Layout.tagWidth) / (a4Layout.columns + 1);
+  const verticalGap = (a4Layout.pageHeight - a4Layout.rows * a4Layout.tagHeight) / (a4Layout.rows + 1);
+
+  for (const [index, order] of orders.entries()) {
+    if (index > 0 && index % 4 === 0) {
+      pdf.addPage();
+    }
+    const position = index % 4;
+    const column = position % a4Layout.columns;
+    const row = Math.floor(position / a4Layout.columns);
+    const x = horizontalGap + column * (a4Layout.tagWidth + horizontalGap);
+    const y = verticalGap + row * (a4Layout.tagHeight + verticalGap);
+    const imageBuffer = await fs.readFile(order.png_path);
+    const imageData = `data:image/png;base64,${imageBuffer.toString("base64")}`;
+
+    pdf.addImage(imageData, "PNG", x, y, a4Layout.tagWidth, a4Layout.tagHeight);
+    pdf.setDrawColor(0, 0, 0);
+    pdf.setLineWidth(0.15);
+    pdf.rect(x, y, a4Layout.tagWidth, a4Layout.tagHeight);
+    pdf.setLineWidth(0.1);
+    const markLength = 4;
+    const corners = [
+      [x, y, 1, 1],
+      [x + a4Layout.tagWidth, y, -1, 1],
+      [x, y + a4Layout.tagHeight, 1, -1],
+      [x + a4Layout.tagWidth, y + a4Layout.tagHeight, -1, -1]
+    ];
+    corners.forEach(([cornerX, cornerY, directionX, directionY]) => {
+      pdf.line(cornerX, cornerY, cornerX + directionX * markLength, cornerY);
+      pdf.line(cornerX, cornerY, cornerX, cornerY + directionY * markLength);
+    });
+
+    if (showOrderNo) {
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(7);
+      pdf.text(order.order_no, x + a4Layout.tagWidth / 2, y + a4Layout.tagHeight + 5, { align: "center" });
+    }
+  }
+
+  pdf.setProperties({ title: "A4 Luggage Tag Layout" });
+  return Buffer.from(pdf.output("arraybuffer"));
+}
+
 app.get("/api/settings", async (_req, res) => {
   res.json(await getSettings());
 });
@@ -177,6 +252,30 @@ app.get("/api/preview-number", async (_req, res) => {
 app.get("/api/orders", async (_req, res) => {
   const rows = db.prepare("SELECT * FROM orders ORDER BY id DESC").all();
   res.json(rows.map(toPublicOrder));
+});
+
+app.post("/api/orders/a4-layout", async (req, res) => {
+  const orderIds = parseOrderIds(req.body.orderIds);
+  const orders = getOrdersByIds(orderIds);
+  if (!orders.length) {
+    return res.status(400).json({ message: "Select at least one order" });
+  }
+  try {
+    const pdfBuffer = await createA4LayoutPdf(orders, { showOrderNo: req.body.showOrderNo !== false });
+    const filename = `a4-layout-${new Date().toISOString().replace(/[:.]/g, "-")}.pdf`;
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(pdfBuffer);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Failed to create A4 layout PDF" });
+  }
+});
+
+app.get("/api/orders/batch", async (req, res) => {
+  const orderIds = parseOrderIds(req.query.ids);
+  const orders = getOrdersByIds(orderIds);
+  res.json(orders.map(toPublicOrder));
 });
 
 app.get("/api/orders/:id", async (req, res) => {
