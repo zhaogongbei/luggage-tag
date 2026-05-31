@@ -15,7 +15,7 @@ import {
 import "./styles.css";
 
 const API_BASE = import.meta.env.DEV ? `${window.location.protocol}//${window.location.hostname}:3001` : "";
-const APP_VERSION = "V1.4.6";
+const APP_VERSION = "V1.4.7";
 const deploymentModes = [
   { value: "private", label: "Private", description: "仅员工登录后可使用定制页和后台" },
   { value: "invite", label: "Invite", description: "邀请码可访问定制页，后台仍需员工登录" },
@@ -546,12 +546,6 @@ function CustomerPage({ settings, previewNumber, onCreated, terminalMode = false
           />
           <small className="field-hint">英文最多 12 字符，中文最多 6 字符，自动大写</small>
         </label>
-        {!terminalMode && (
-          <div className="number-strip">
-            <span>预览编号</span>
-            <strong>{previewNumber}</strong>
-          </div>
-        )}
         <button className="primary-btn" disabled={busy} onClick={submitOrder} type="button">
           <CheckCircle2 size={18} />
           {busy ? "生成中" : "确认生成"}
@@ -567,7 +561,7 @@ function CustomerPage({ settings, previewNumber, onCreated, terminalMode = false
           template={template}
           timestamp={timestamp}
           watermarkEnabled={settings.watermarkEnabled}
-          showMeta={!terminalMode}
+          showMeta={false}
         />
       </section>
     </main>
