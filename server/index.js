@@ -388,13 +388,12 @@ function getPngSize(buffer) {
 
 function normalizeCustomerName(value) {
   return String(value ?? "")
-    .toUpperCase()
-    .replace(/[^A-Z]/g, "")
+    .replace(/[^A-Za-z]/g, "")
     .slice(0, 12);
 }
 
 function isValidCustomerName(value) {
-  return /^[A-Z]{1,12}$/.test(value);
+  return /^[A-Za-z]{1,12}$/.test(value);
 }
 
 function isValidRawCustomerName(value) {

@@ -14,7 +14,7 @@ import {
 import "./styles.css";
 
 const API_BASE = import.meta.env.DEV ? `${window.location.protocol}//${window.location.hostname}:3001` : "";
-const APP_VERSION = "V1.4.10";
+const APP_VERSION = "V1.4.11";
 const deploymentModes = [
   { value: "private", label: "Private", description: "仅员工登录后可使用定制页和后台" },
   { value: "invite", label: "Invite", description: "邀请码可访问定制页，后台仍需员工登录" },
@@ -108,13 +108,12 @@ function formatDateTime(value = new Date()) {
 
 function normalizeCustomerName(value) {
   return String(value ?? "")
-    .toUpperCase()
-    .replace(/[^A-Z]/g, "")
+    .replace(/[^A-Za-z]/g, "")
     .slice(0, 12);
 }
 
 function isValidCustomerName(value) {
-  return /^[A-Z]{1,12}$/.test(value);
+  return /^[A-Za-z]{1,12}$/.test(value);
 }
 
 function parseBooleanParam(value) {
@@ -559,7 +558,7 @@ function CustomerPage({ settings, previewNumber, onCreated, autoPrint = false, a
           <input
             autoComplete="off"
             autoFocus
-            autoCapitalize="characters"
+            autoCapitalize="words"
             enterKeyHint="done"
             inputMode="text"
             lang="en"
