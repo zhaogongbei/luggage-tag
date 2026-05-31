@@ -387,9 +387,18 @@ function getPngSize(buffer) {
 }
 
 function normalizeCustomerName(value) {
-  const upperValue = value.trim().toUpperCase();
-  const hasChinese = /[\u3400-\u9fff]/.test(upperValue);
-  return Array.from(upperValue).slice(0, hasChinese ? 6 : 12).join("");
+  return String(value ?? "")
+    .toUpperCase()
+    .replace(/[^A-Z]/g, "")
+    .slice(0, 12);
+}
+
+function isValidCustomerName(value) {
+  return /^[A-Z]{1,12}$/.test(value);
+}
+
+function isValidRawCustomerName(value) {
+  return /^[A-Za-z]{1,12}$/.test(String(value ?? "").trim());
 }
 
 function toPublicOrder(order) {
@@ -877,14 +886,15 @@ app.get("/api/orders/:id/ticket", requireCustomerAccess, async (req, res) => {
 
 app.post("/api/orders", requireCustomerAccess, async (req, res) => {
   const templateId = String(req.body.templateId ?? "");
-  const customerText = normalizeCustomerName(String(req.body.customerText ?? ""));
+  const rawCustomerText = String(req.body.customerText ?? "");
+  const customerText = normalizeCustomerName(rawCustomerText);
   const pngDataUrl = String(req.body.pngDataUrl ?? "");
 
   if (!templateIds.includes(templateId)) {
     return res.status(400).json({ message: "Invalid template" });
   }
-  if (!customerText) {
-    return res.status(400).json({ message: "Customer text is required" });
+  if (!isValidRawCustomerName(rawCustomerText) || !isValidCustomerName(customerText)) {
+    return res.status(400).json({ message: "Customer name must contain 1-12 English letters only" });
   }
 
   try {

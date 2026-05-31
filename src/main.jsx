@@ -14,7 +14,7 @@ import {
 import "./styles.css";
 
 const API_BASE = import.meta.env.DEV ? `${window.location.protocol}//${window.location.hostname}:3001` : "";
-const APP_VERSION = "V1.4.9";
+const APP_VERSION = "V1.4.10";
 const deploymentModes = [
   { value: "private", label: "Private", description: "仅员工登录后可使用定制页和后台" },
   { value: "invite", label: "Invite", description: "邀请码可访问定制页，后台仍需员工登录" },
@@ -107,10 +107,14 @@ function formatDateTime(value = new Date()) {
 }
 
 function normalizeCustomerName(value) {
-  const upperValue = value.trim().toUpperCase();
-  const chars = Array.from(upperValue);
-  const hasChinese = /[\u3400-\u9fff]/.test(upperValue);
-  return chars.slice(0, hasChinese ? 6 : 12).join("");
+  return String(value ?? "")
+    .toUpperCase()
+    .replace(/[^A-Z]/g, "")
+    .slice(0, 12);
+}
+
+function isValidCustomerName(value) {
+  return /^[A-Z]{1,12}$/.test(value);
 }
 
 function parseBooleanParam(value) {
@@ -464,8 +468,8 @@ function CustomerPage({ settings, previewNumber, onCreated, autoPrint = false, a
   const normalizedName = normalizeCustomerName(customerText);
 
   async function submitOrder() {
-    if (!normalizedName) {
-      setMessage("请输入姓名");
+    if (!isValidCustomerName(normalizedName)) {
+      setMessage("请输入 1-12 位英文字母");
       setMessageType("error");
       return;
     }
@@ -555,7 +559,13 @@ function CustomerPage({ settings, previewNumber, onCreated, autoPrint = false, a
           <input
             autoComplete="off"
             autoFocus
+            autoCapitalize="characters"
+            enterKeyHint="done"
+            inputMode="text"
+            lang="en"
             maxLength={12}
+            pattern="[A-Za-z]*"
+            spellCheck="false"
             value={customerText}
             onChange={(event) => setCustomerText(normalizeCustomerName(event.target.value))}
             placeholder="MARISSA"
