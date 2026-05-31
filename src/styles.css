@@ -314,6 +314,19 @@ input[type="checkbox"] {
   grid-template-columns: minmax(220px, 1fr) minmax(260px, 1fr) auto auto;
 }
 
+.layout-grid {
+  align-items: end;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(5, minmax(130px, 1fr));
+}
+
+.layout-summary {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
 .toggle {
   align-items: center;
   background: white;
@@ -444,7 +457,7 @@ th {
   width: auto;
 }
 
-.a4-print-shell {
+.imposition-print-shell {
   align-items: center;
   background: #dfe4dc;
   display: grid;
@@ -454,34 +467,46 @@ th {
   padding: 24px;
 }
 
-.a4-toolbar {
+.imposition-toolbar {
   max-width: 210mm;
 }
 
-.a4-page {
+.imposition-page {
   background: white;
   box-shadow: 0 18px 60px rgba(22, 32, 29, 0.18);
-  height: 297mm;
   page-break-after: always;
   position: relative;
-  width: 210mm;
 }
 
-.a4-tag {
+.imposition-tag {
   margin: 0;
   position: absolute;
-  width: 70mm;
 }
 
-.a4-tag img {
+.imposition-frame {
   border: 0.2mm solid #111111;
-  display: block;
-  height: 110mm;
-  object-fit: contain;
-  width: 70mm;
+  overflow: hidden;
+  position: relative;
 }
 
-.a4-tag figcaption {
+.imposition-tag.no-crop .imposition-frame {
+  border: none;
+}
+
+.imposition-frame img {
+  display: block;
+  object-fit: contain;
+}
+
+.imposition-tag.rotated .imposition-frame img {
+  left: 0;
+  position: absolute;
+  top: 100%;
+  transform: rotate(-90deg);
+  transform-origin: top left;
+}
+
+.imposition-tag figcaption {
   color: #111111;
   font-family: Helvetica, Arial, sans-serif;
   font-size: 8pt;
@@ -522,6 +547,10 @@ th {
   .printer-grid {
     grid-template-columns: 1fr;
   }
+
+  .layout-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media print {
@@ -556,20 +585,20 @@ th {
     width: 7cm;
   }
 
-  .a4-print-shell {
+  .imposition-print-shell {
     background: white;
     display: block;
     min-height: auto;
     padding: 0;
   }
 
-  .a4-page {
+  .imposition-page {
     box-shadow: none;
     break-after: page;
     page-break-after: always;
   }
 
-  .a4-page:last-child {
+  .imposition-page:last-child {
     break-after: auto;
     page-break-after: auto;
   }

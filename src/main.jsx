@@ -12,14 +12,24 @@ import {
 import "./styles.css";
 
 const API_BASE = import.meta.env.DEV ? `${window.location.protocol}//${window.location.hostname}:3001` : "";
-const APP_VERSION = "V1.2.0";
-const a4Layout = {
-  pageWidth: 210,
-  pageHeight: 297,
-  tagWidth: 70,
-  tagHeight: 110,
-  columns: 2,
-  rows: 2
+const APP_VERSION = "V1.3.0";
+const paperPresets = {
+  A5: { width: 148, height: 210 },
+  A4: { width: 210, height: 297 },
+  A3: { width: 297, height: 420 },
+  CUSTOM: { width: 210, height: 297 }
+};
+const defaultLayoutOptions = {
+  paperPreset: "A4",
+  paperWidth: 210,
+  paperHeight: 297,
+  productWidth: 70,
+  productHeight: 110,
+  margin: 8,
+  gap: 6,
+  autoRotate: true,
+  cropMarks: true,
+  showOrderNo: true
 };
 
 const templates = [
@@ -203,96 +213,137 @@ function PrintPage({ orderId }) {
   );
 }
 
-function chunkOrders(orders) {
+function chunkOrders(orders, capacity) {
   const pages = [];
-  for (let index = 0; index < orders.length; index += 4) {
-    pages.push(orders.slice(index, index + 4));
+  for (let index = 0; index < orders.length; index += capacity) {
+    pages.push(orders.slice(index, index + capacity));
   }
   return pages;
 }
 
-function getA4Position(index) {
-  const horizontalGap = (a4Layout.pageWidth - a4Layout.columns * a4Layout.tagWidth) / (a4Layout.columns + 1);
-  const verticalGap = (a4Layout.pageHeight - a4Layout.rows * a4Layout.tagHeight) / (a4Layout.rows + 1);
-  const position = index % 4;
-  const column = position % a4Layout.columns;
-  const row = Math.floor(position / a4Layout.columns);
+function normalizeLayoutOptions(options) {
+  const presetSize = paperPresets[options.paperPreset] ?? paperPresets.A4;
   return {
-    left: horizontalGap + column * (a4Layout.tagWidth + horizontalGap),
-    top: verticalGap + row * (a4Layout.tagHeight + verticalGap)
+    ...options,
+    paperWidth: options.paperPreset === "CUSTOM" ? Number(options.paperWidth) : presetSize.width,
+    paperHeight: options.paperPreset === "CUSTOM" ? Number(options.paperHeight) : presetSize.height,
+    productWidth: Number(options.productWidth),
+    productHeight: Number(options.productHeight),
+    margin: Number(options.margin),
+    gap: Number(options.gap)
   };
 }
 
-function A4PrintPage({ orderIds }) {
+function ImpositionPrintPage({ orderIds, layoutOptions }) {
   const [orders, setOrders] = useState([]);
+  const [layout, setLayout] = useState(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    const style = document.createElement("style");
-    style.textContent = "@page { size: A4 portrait; margin: 0; }";
-    document.head.appendChild(style);
-    return () => style.remove();
-  }, []);
-
-  useEffect(() => {
-    async function loadOrders() {
+    async function loadPrintData() {
       try {
-        const response = await fetch(`${API_BASE}/api/orders/batch?ids=${orderIds.join(",")}`);
-        const data = await response.json();
-        if (!response.ok) {
-          throw new Error(data.message || "无法加载拼版订单");
+        const [ordersResponse, layoutResponse] = await Promise.all([
+          fetch(`${API_BASE}/api/orders/batch?ids=${orderIds.join(",")}`),
+          fetch(`${API_BASE}/api/layout/preview`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ layoutOptions: normalizeLayoutOptions(layoutOptions) })
+          })
+        ]);
+        const ordersData = await ordersResponse.json();
+        const layoutData = await layoutResponse.json();
+        if (!ordersResponse.ok) {
+          throw new Error(ordersData.message || "无法加载拼版订单");
         }
-        setOrders(data);
+        if (!layoutResponse.ok) {
+          throw new Error(layoutData.message || "无法计算拼版");
+        }
+        setOrders(ordersData);
+        setLayout(layoutData);
       } catch (loadError) {
         setError(loadError.message);
       }
     }
-    loadOrders();
-  }, [orderIds]);
+    loadPrintData();
+  }, [orderIds, layoutOptions]);
 
   useEffect(() => {
-    if (orders.length) {
+    const style = document.createElement("style");
+    const options = layout ?? normalizeLayoutOptions(layoutOptions);
+    style.textContent = `@page { size: ${options.paperWidth}mm ${options.paperHeight}mm; margin: 0; }`;
+    document.head.appendChild(style);
+    return () => style.remove();
+  }, [layout, layoutOptions]);
+
+  useEffect(() => {
+    if (orders.length && layout) {
       const timer = window.setTimeout(() => window.print(), 600);
       return () => window.clearTimeout(timer);
     }
     return undefined;
-  }, [orders]);
+  }, [orders, layout]);
 
   if (error) {
     return (
-      <main className="a4-print-shell">
+      <main className="imposition-print-shell">
         <p className="message">{error}</p>
       </main>
     );
   }
 
   return (
-    <main className="a4-print-shell">
-      <div className="print-toolbar a4-toolbar">
+    <main className="imposition-print-shell">
+      <div className="print-toolbar imposition-toolbar">
         <div>
-          <strong>A4 拼版打印</strong>
-          <span>{orders.length ? `${orders.length} 个订单` : "Loading..."}</span>
+          <strong>智能拼版打印</strong>
+          <span>{layout ? `${orders.length} 个订单 / 每页 ${layout.capacity} 个 / ${layout.columns}列 × ${layout.rows}行` : "Loading..."}</span>
         </div>
         <button className="primary-btn compact" onClick={() => window.print()} type="button">
           <Printer size={18} />
           打印
         </button>
       </div>
-      {chunkOrders(orders).map((pageOrders, pageIndex) => (
-        <section className="a4-page" key={pageIndex}>
+      {layout && chunkOrders(orders, layout.capacity).map((pageOrders, pageIndex) => (
+        <section
+          className="imposition-page"
+          key={pageIndex}
+          style={{
+            height: `${layout.paperHeight}mm`,
+            width: `${layout.paperWidth}mm`
+          }}
+        >
           {pageOrders.map((order, orderIndex) => {
-            const position = getA4Position(orderIndex);
+            const position = layout.positions[orderIndex];
             return (
               <figure
-                className="a4-tag"
+                className={`imposition-tag ${layout.autoRotated ? "rotated" : ""} ${layout.cropMarks ? "" : "no-crop"}`}
                 key={order.id}
                 style={{
-                  left: `${position.left}mm`,
-                  top: `${position.top}mm`
+                  left: `${position.x}mm`,
+                  top: `${position.y}mm`,
+                  width: `${layout.productWidth}mm`
                 }}
               >
-                <img alt={order.order_no} src={`${API_BASE}/api/orders/${order.id}/file/png`} />
-                <figcaption>{order.order_no}</figcaption>
+                <div
+                  className="imposition-frame"
+                  style={{
+                    height: `${layout.productHeight}mm`,
+                    width: `${layout.productWidth}mm`
+                  }}
+                >
+                  <img
+                    alt={order.order_no}
+                    src={`${API_BASE}/api/orders/${order.id}/file/png`}
+                    style={layout.autoRotated ? {
+                      height: `${layout.productWidth}mm`,
+                      width: `${layout.productHeight}mm`
+                    } : {
+                      height: `${layout.productHeight}mm`,
+                      width: `${layout.productWidth}mm`
+                    }}
+                  />
+                </div>
+                {layout.showOrderNo && <figcaption>{order.order_no}</figcaption>}
               </figure>
             );
           })}
@@ -404,6 +455,8 @@ function AdminPage({ settings, onSettingsSaved }) {
   const [printerState, setPrinterState] = useState({ printers: [], defaultPrinter: "", selectedPrinter: "" });
   const [printerMessage, setPrinterMessage] = useState("");
   const [selectedOrderIds, setSelectedOrderIds] = useState([]);
+  const [layoutOptions, setLayoutOptions] = useState(defaultLayoutOptions);
+  const [layoutPreview, setLayoutPreview] = useState(null);
 
   useEffect(() => {
     setForm(settings);
@@ -430,6 +483,23 @@ function AdminPage({ settings, onSettingsSaved }) {
     loadOrders();
     loadPrinters();
   }, []);
+
+  useEffect(() => {
+    async function loadLayoutPreview() {
+      try {
+        const response = await fetch(`${API_BASE}/api/layout/preview`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ layoutOptions: normalizeLayoutOptions(layoutOptions) })
+        });
+        const data = await response.json();
+        setLayoutPreview(response.ok ? data : { error: data.message || "拼版参数无效" });
+      } catch (error) {
+        setLayoutPreview({ error: error.message });
+      }
+    }
+    loadLayoutPreview();
+  }, [layoutOptions]);
 
   async function saveSettings() {
     const response = await fetch(`${API_BASE}/api/settings`, {
@@ -467,39 +537,57 @@ function AdminPage({ settings, onSettingsSaved }) {
     setSelectedOrderIds(allSelected ? [] : pendingIds);
   }
 
-  async function downloadA4LayoutPdf() {
+  function updateLayoutOption(key, value) {
+    setLayoutOptions((options) => {
+      const nextOptions = { ...options, [key]: value };
+      if (key === "paperPreset" && value !== "CUSTOM") {
+        nextOptions.paperWidth = paperPresets[value].width;
+        nextOptions.paperHeight = paperPresets[value].height;
+      }
+      return nextOptions;
+    });
+  }
+
+  async function downloadImpositionPdf() {
     if (!selectedOrderIds.length) {
       setPrinterMessage("请先选择订单");
       return;
     }
-    const response = await fetch(`${API_BASE}/api/orders/a4-layout`, {
+    const response = await fetch(`${API_BASE}/api/orders/imposition`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ orderIds: selectedOrderIds, showOrderNo: true })
+      body: JSON.stringify({
+        orderIds: selectedOrderIds,
+        layoutOptions: normalizeLayoutOptions(layoutOptions)
+      })
     });
     if (!response.ok) {
       const data = await response.json();
-      setPrinterMessage(data.message || "A4 拼版 PDF 生成失败");
+      setPrinterMessage(data.message || "拼版 PDF 生成失败");
       return;
     }
     const blob = await response.blob();
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `a4-layout-${Date.now()}.pdf`;
+    anchor.download = `imposition-layout-${Date.now()}.pdf`;
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
     URL.revokeObjectURL(url);
-    setPrinterMessage("A4 拼版 PDF 已生成");
+    setPrinterMessage("拼版 PDF 已生成");
   }
 
-  function openA4PrintPage() {
+  function openImpositionPrintPage() {
     if (!selectedOrderIds.length) {
       setPrinterMessage("请先选择订单");
       return;
     }
-    window.open(`/print-a4?ids=${selectedOrderIds.join(",")}`, "_blank", "noopener,noreferrer");
+    const params = new URLSearchParams({
+      ids: selectedOrderIds.join(","),
+      layout: JSON.stringify(normalizeLayoutOptions(layoutOptions))
+    });
+    window.open(`/print-layout?${params.toString()}`, "_blank", "noopener,noreferrer");
   }
 
   async function saveSelectedPrinter(selectedPrinter) {
@@ -600,18 +688,90 @@ function AdminPage({ settings, onSettingsSaved }) {
         {printerMessage && <p className="message neutral">{printerMessage}</p>}
       </section>
 
+      <section className="panel layout-panel">
+        <div className="section-title split">
+          <span>智能拼版设置</span>
+          <strong className="layout-summary">
+            {layoutPreview?.error
+              ? layoutPreview.error
+              : layoutPreview
+                ? `${layoutPreview.paperWidth}×${layoutPreview.paperHeight}mm / ${layoutPreview.columns}列×${layoutPreview.rows}行 / 每页${layoutPreview.capacity}个${layoutPreview.autoRotated ? " / 已旋转优化" : ""}`
+                : "计算中"}
+          </strong>
+        </div>
+        <div className="layout-grid">
+          <label className="field">
+            <span>纸张</span>
+            <select value={layoutOptions.paperPreset} onChange={(event) => updateLayoutOption("paperPreset", event.target.value)}>
+              <option value="A4">A4 210×297mm</option>
+              <option value="A3">A3 297×420mm</option>
+              <option value="A5">A5 148×210mm</option>
+              <option value="CUSTOM">自定义尺寸</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>纸张宽 mm</span>
+            <input
+              disabled={layoutOptions.paperPreset !== "CUSTOM"}
+              min="20"
+              type="number"
+              value={layoutOptions.paperWidth}
+              onChange={(event) => updateLayoutOption("paperWidth", event.target.value)}
+            />
+          </label>
+          <label className="field">
+            <span>纸张高 mm</span>
+            <input
+              disabled={layoutOptions.paperPreset !== "CUSTOM"}
+              min="20"
+              type="number"
+              value={layoutOptions.paperHeight}
+              onChange={(event) => updateLayoutOption("paperHeight", event.target.value)}
+            />
+          </label>
+          <label className="field">
+            <span>成品宽 mm</span>
+            <input min="5" type="number" value={layoutOptions.productWidth} onChange={(event) => updateLayoutOption("productWidth", event.target.value)} />
+          </label>
+          <label className="field">
+            <span>成品高 mm</span>
+            <input min="5" type="number" value={layoutOptions.productHeight} onChange={(event) => updateLayoutOption("productHeight", event.target.value)} />
+          </label>
+          <label className="field">
+            <span>最小边距 mm</span>
+            <input min="0" type="number" value={layoutOptions.margin} onChange={(event) => updateLayoutOption("margin", event.target.value)} />
+          </label>
+          <label className="field">
+            <span>间距 mm</span>
+            <input min="0" type="number" value={layoutOptions.gap} onChange={(event) => updateLayoutOption("gap", event.target.value)} />
+          </label>
+          <label className="toggle">
+            <input checked={layoutOptions.autoRotate} onChange={(event) => updateLayoutOption("autoRotate", event.target.checked)} type="checkbox" />
+            <span>自动旋转优化</span>
+          </label>
+          <label className="toggle">
+            <input checked={layoutOptions.cropMarks} onChange={(event) => updateLayoutOption("cropMarks", event.target.checked)} type="checkbox" />
+            <span>生成裁切线</span>
+          </label>
+          <label className="toggle">
+            <input checked={layoutOptions.showOrderNo} onChange={(event) => updateLayoutOption("showOrderNo", event.target.checked)} type="checkbox" />
+            <span>下方显示编号</span>
+          </label>
+        </div>
+      </section>
+
       <section className="panel orders-panel">
         <div className="section-title split">
           <span>订单列表</span>
           <div className="order-toolbar">
             <strong>{selectedOrderIds.length} 已选</strong>
-            <button className="secondary-btn inline" onClick={downloadA4LayoutPdf} type="button">
+            <button className="secondary-btn inline" onClick={downloadImpositionPdf} type="button">
               <Download size={18} />
-              生成A4拼版PDF
+              生成拼版PDF
             </button>
-            <button className="secondary-btn inline" onClick={openA4PrintPage} type="button">
+            <button className="secondary-btn inline" onClick={openImpositionPrintPage} type="button">
               <Printer size={18} />
-              A4拼版打印
+              拼版打印
             </button>
             <button className="icon-btn" onClick={loadOrders} title="刷新" type="button">
               <RefreshCw size={18} />
@@ -694,7 +854,7 @@ function AdminPage({ settings, onSettingsSaved }) {
 
 function App() {
   const printMatch = window.location.pathname.match(/^\/print\/(\d+)$/);
-  const a4PrintMatch = window.location.pathname === "/print-a4";
+  const impositionPrintMatch = window.location.pathname === "/print-layout" || window.location.pathname === "/print-a4";
   const [page, setPage] = useState("customer");
   const [settings, setSettings] = useState({ prefix: "No.", currentNumber: 1, digits: 4, watermarkEnabled: true });
   const [previewNumber, setPreviewNumber] = useState("No.0001");
@@ -722,9 +882,19 @@ function App() {
     return <PrintPage orderId={printMatch[1]} />;
   }
 
-  if (a4PrintMatch) {
-    const orderIds = new URLSearchParams(window.location.search).get("ids")?.split(",").map(Number).filter(Boolean) ?? [];
-    return <A4PrintPage orderIds={orderIds} />;
+  if (impositionPrintMatch) {
+    const params = new URLSearchParams(window.location.search);
+    const orderIds = params.get("ids")?.split(",").map(Number).filter(Boolean) ?? [];
+    const layoutParam = params.get("layout");
+    let layoutOptions = defaultLayoutOptions;
+    if (layoutParam) {
+      try {
+        layoutOptions = { ...defaultLayoutOptions, ...JSON.parse(layoutParam) };
+      } catch {
+        layoutOptions = defaultLayoutOptions;
+      }
+    }
+    return <ImpositionPrintPage orderIds={orderIds} layoutOptions={layoutOptions} />;
   }
 
   return (

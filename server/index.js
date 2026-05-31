@@ -49,13 +49,22 @@ const defaultSettings = {
   selectedPrinter: ""
 };
 const templateIds = ["template_01", "template_02", "template_03"];
-const a4Layout = {
-  pageWidth: 210,
-  pageHeight: 297,
-  tagWidth: 70,
-  tagHeight: 110,
-  columns: 2,
-  rows: 2
+const paperPresets = {
+  A5: { width: 148, height: 210 },
+  A4: { width: 210, height: 297 },
+  A3: { width: 297, height: 420 }
+};
+const defaultLayoutOptions = {
+  paperPreset: "A4",
+  paperWidth: 210,
+  paperHeight: 297,
+  productWidth: 70,
+  productHeight: 110,
+  margin: 8,
+  gap: 6,
+  showOrderNo: true,
+  cropMarks: true,
+  autoRotate: true
 };
 
 for (const [key, value] of Object.entries(defaultSettings)) {
@@ -142,6 +151,116 @@ function getOrdersByIds(orderIds) {
   return orderIds.map((id) => byId.get(id)).filter(Boolean);
 }
 
+function parseNumber(value, fallback, min = 0.1, max = 2000) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    return fallback;
+  }
+  return Math.min(max, Math.max(min, number));
+}
+
+function normalizeLayoutOptions(value = {}) {
+  const preset = String(value.paperPreset ?? defaultLayoutOptions.paperPreset).toUpperCase();
+  const presetSize = paperPresets[preset];
+  const paperWidth = presetSize
+    ? presetSize.width
+    : parseNumber(value.paperWidth, defaultLayoutOptions.paperWidth, 20);
+  const paperHeight = presetSize
+    ? presetSize.height
+    : parseNumber(value.paperHeight, defaultLayoutOptions.paperHeight, 20);
+
+  return {
+    paperPreset: presetSize ? preset : "CUSTOM",
+    paperWidth,
+    paperHeight,
+    productWidth: parseNumber(value.productWidth, defaultLayoutOptions.productWidth, 5),
+    productHeight: parseNumber(value.productHeight, defaultLayoutOptions.productHeight, 5),
+    margin: parseNumber(value.margin, defaultLayoutOptions.margin, 0),
+    gap: parseNumber(value.gap, defaultLayoutOptions.gap, 0),
+    showOrderNo: value.showOrderNo !== false,
+    cropMarks: value.cropMarks !== false,
+    autoRotate: value.autoRotate !== false
+  };
+}
+
+function scoreLayout(candidate) {
+  const usedWidth = candidate.columns * candidate.itemWidth + (candidate.columns - 1) * candidate.gap;
+  const usedHeight = candidate.rows * candidate.blockHeight + (candidate.rows - 1) * candidate.gap;
+  return {
+    capacity: candidate.capacity,
+    usedArea: usedWidth * usedHeight,
+    waste: candidate.pageWidth * candidate.pageHeight - usedWidth * usedHeight
+  };
+}
+
+function computeImpositionLayout(rawOptions = {}) {
+  const options = normalizeLayoutOptions(rawOptions);
+  const labelHeight = options.showOrderNo ? 6 : 0;
+  const pageOrientations = [
+    { pageWidth: options.paperWidth, pageHeight: options.paperHeight, pageRotated: false },
+    { pageWidth: options.paperHeight, pageHeight: options.paperWidth, pageRotated: true }
+  ];
+  const itemOrientations = [
+    { itemWidth: options.productWidth, itemHeight: options.productHeight, itemRotated: false },
+    { itemWidth: options.productHeight, itemHeight: options.productWidth, itemRotated: true }
+  ].filter((item, index) => index === 0 || options.autoRotate);
+
+  const candidates = [];
+  for (const page of pageOrientations) {
+    for (const item of itemOrientations) {
+      const usableWidth = page.pageWidth - options.margin * 2;
+      const usableHeight = page.pageHeight - options.margin * 2;
+      const blockHeight = item.itemHeight + labelHeight;
+      const columns = Math.floor((usableWidth + options.gap) / (item.itemWidth + options.gap));
+      const rows = Math.floor((usableHeight + options.gap) / (blockHeight + options.gap));
+      if (columns > 0 && rows > 0) {
+        candidates.push({
+          ...options,
+          ...page,
+          ...item,
+          blockHeight,
+          columns,
+          rows,
+          capacity: columns * rows,
+          labelHeight
+        });
+      }
+    }
+  }
+
+  if (!candidates.length) {
+    throw new Error("Product size does not fit on selected paper");
+  }
+
+  candidates.sort((left, right) => {
+    const leftScore = scoreLayout(left);
+    const rightScore = scoreLayout(right);
+    if (rightScore.capacity !== leftScore.capacity) {
+      return rightScore.capacity - leftScore.capacity;
+    }
+    return leftScore.waste - rightScore.waste;
+  });
+
+  const best = candidates[0];
+  const totalWidth = best.columns * best.itemWidth + (best.columns - 1) * best.gap;
+  const totalHeight = best.rows * best.blockHeight + (best.rows - 1) * best.gap;
+  const startX = (best.pageWidth - totalWidth) / 2;
+  const startY = (best.pageHeight - totalHeight) / 2;
+  const positions = Array.from({ length: best.capacity }, (_, index) => {
+    const column = index % best.columns;
+    const row = Math.floor(index / best.columns);
+    return {
+      x: startX + column * (best.itemWidth + best.gap),
+      y: startY + row * (best.blockHeight + best.gap),
+      index,
+      column,
+      row
+    };
+  });
+
+  return { ...best, positions };
+}
+
 async function getWindowsPrinters() {
   if (process.platform !== "win32") {
     return [];
@@ -175,53 +294,58 @@ async function createPdfFromPng(orderNo, pngDataUrl, outputPath) {
   await fs.writeFile(outputPath, Buffer.from(pdf.output("arraybuffer")));
 }
 
-async function createA4LayoutPdf(orders, { showOrderNo = true } = {}) {
+function drawCropMarks(pdf, x, y, width, height) {
+  const markLength = 4;
+  const corners = [
+    [x, y, 1, 1],
+    [x + width, y, -1, 1],
+    [x, y + height, 1, -1],
+    [x + width, y + height, -1, -1]
+  ];
+  pdf.setDrawColor(0, 0, 0);
+  pdf.setLineWidth(0.1);
+  corners.forEach(([cornerX, cornerY, directionX, directionY]) => {
+    pdf.line(cornerX, cornerY, cornerX + directionX * markLength, cornerY);
+    pdf.line(cornerX, cornerY, cornerX, cornerY + directionY * markLength);
+  });
+}
+
+async function createImpositionPdf(orders, rawOptions = {}) {
+  const layout = computeImpositionLayout(rawOptions);
   const pdf = new jsPDF({
-    orientation: "portrait",
+    orientation: layout.pageWidth >= layout.pageHeight ? "landscape" : "portrait",
     unit: "mm",
-    format: "a4",
+    format: [layout.pageWidth, layout.pageHeight],
     compress: true
   });
-  const horizontalGap = (a4Layout.pageWidth - a4Layout.columns * a4Layout.tagWidth) / (a4Layout.columns + 1);
-  const verticalGap = (a4Layout.pageHeight - a4Layout.rows * a4Layout.tagHeight) / (a4Layout.rows + 1);
 
   for (const [index, order] of orders.entries()) {
-    if (index > 0 && index % 4 === 0) {
+    if (index > 0 && index % layout.capacity === 0) {
       pdf.addPage();
     }
-    const position = index % 4;
-    const column = position % a4Layout.columns;
-    const row = Math.floor(position / a4Layout.columns);
-    const x = horizontalGap + column * (a4Layout.tagWidth + horizontalGap);
-    const y = verticalGap + row * (a4Layout.tagHeight + verticalGap);
+    const position = layout.positions[index % layout.capacity];
+    const x = position.x;
+    const y = position.y;
     const imageBuffer = await fs.readFile(order.png_path);
     const imageData = `data:image/png;base64,${imageBuffer.toString("base64")}`;
 
-    pdf.addImage(imageData, "PNG", x, y, a4Layout.tagWidth, a4Layout.tagHeight);
-    pdf.setDrawColor(0, 0, 0);
-    pdf.setLineWidth(0.15);
-    pdf.rect(x, y, a4Layout.tagWidth, a4Layout.tagHeight);
-    pdf.setLineWidth(0.1);
-    const markLength = 4;
-    const corners = [
-      [x, y, 1, 1],
-      [x + a4Layout.tagWidth, y, -1, 1],
-      [x, y + a4Layout.tagHeight, 1, -1],
-      [x + a4Layout.tagWidth, y + a4Layout.tagHeight, -1, -1]
-    ];
-    corners.forEach(([cornerX, cornerY, directionX, directionY]) => {
-      pdf.line(cornerX, cornerY, cornerX + directionX * markLength, cornerY);
-      pdf.line(cornerX, cornerY, cornerX, cornerY + directionY * markLength);
-    });
+    if (layout.itemRotated) {
+      pdf.addImage(imageData, "PNG", x, y + layout.itemHeight, layout.itemHeight, layout.itemWidth, undefined, "FAST", 90);
+    } else {
+      pdf.addImage(imageData, "PNG", x, y, layout.itemWidth, layout.itemHeight);
+    }
+    if (layout.cropMarks) {
+      drawCropMarks(pdf, x, y, layout.itemWidth, layout.itemHeight);
+    }
 
-    if (showOrderNo) {
+    if (layout.showOrderNo) {
       pdf.setFont("helvetica", "normal");
       pdf.setFontSize(7);
-      pdf.text(order.order_no, x + a4Layout.tagWidth / 2, y + a4Layout.tagHeight + 5, { align: "center" });
+      pdf.text(order.order_no, x + layout.itemWidth / 2, y + layout.itemHeight + 4.5, { align: "center" });
     }
   }
 
-  pdf.setProperties({ title: "A4 Luggage Tag Layout" });
+  pdf.setProperties({ title: "Luggage Tag Imposition Layout" });
   return Buffer.from(pdf.output("arraybuffer"));
 }
 
@@ -254,6 +378,51 @@ app.get("/api/orders", async (_req, res) => {
   res.json(rows.map(toPublicOrder));
 });
 
+app.post("/api/layout/preview", async (req, res) => {
+  try {
+    const layout = computeImpositionLayout(req.body.layoutOptions ?? req.body);
+    res.json({
+      paperWidth: layout.pageWidth,
+      paperHeight: layout.pageHeight,
+      productWidth: layout.itemWidth,
+      productHeight: layout.itemHeight,
+      columns: layout.columns,
+      rows: layout.rows,
+      capacity: layout.capacity,
+      autoRotated: layout.itemRotated,
+      pageRotated: layout.pageRotated,
+      gap: layout.gap,
+      margin: layout.margin,
+      showOrderNo: layout.showOrderNo,
+      cropMarks: layout.cropMarks,
+      labelHeight: layout.labelHeight,
+      positions: layout.positions
+    });
+  } catch (error) {
+    res.status(400).json({ message: error.message });
+  }
+});
+
+app.post("/api/orders/imposition", async (req, res) => {
+  const orderIds = parseOrderIds(req.body.orderIds);
+  const orders = getOrdersByIds(orderIds);
+  if (!orders.length) {
+    return res.status(400).json({ message: "Select at least one order" });
+  }
+  try {
+    const layoutOptions = req.body.layoutOptions ?? req.body;
+    const layout = computeImpositionLayout(layoutOptions);
+    const pdfBuffer = await createImpositionPdf(orders, layoutOptions);
+    const filename = `imposition-${layout.paperPreset.toLowerCase()}-${new Date().toISOString().replace(/[:.]/g, "-")}.pdf`;
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(pdfBuffer);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: error.message || "Failed to create imposition PDF" });
+  }
+});
+
 app.post("/api/orders/a4-layout", async (req, res) => {
   const orderIds = parseOrderIds(req.body.orderIds);
   const orders = getOrdersByIds(orderIds);
@@ -261,7 +430,11 @@ app.post("/api/orders/a4-layout", async (req, res) => {
     return res.status(400).json({ message: "Select at least one order" });
   }
   try {
-    const pdfBuffer = await createA4LayoutPdf(orders, { showOrderNo: req.body.showOrderNo !== false });
+    const pdfBuffer = await createImpositionPdf(orders, {
+      ...defaultLayoutOptions,
+      ...(req.body.layoutOptions ?? {}),
+      showOrderNo: req.body.showOrderNo !== false
+    });
     const filename = `a4-layout-${new Date().toISOString().replace(/[:.]/g, "-")}.pdf`;
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
