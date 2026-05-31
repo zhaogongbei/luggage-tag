@@ -282,7 +282,7 @@ select:focus {
 }
 
 .tag-canvas {
-  background: white;
+  background: transparent;
   box-shadow: 0 30px 90px rgba(22, 32, 29, 0.22);
   height: auto;
   max-height: calc(100vh - 150px);
@@ -381,7 +381,7 @@ th {
 
 .print-page {
   align-items: center;
-  background: #eeeeea;
+  background: transparent;
   display: grid;
   gap: 18px;
   min-height: 100vh;
@@ -411,7 +411,7 @@ th {
 
 .print-sheet {
   align-items: center;
-  background: white;
+  background: transparent;
   display: flex;
   justify-content: center;
   padding: 0;
