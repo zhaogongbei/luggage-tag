@@ -593,10 +593,21 @@ input[type="checkbox"] {
   grid-template-columns: repeat(5, minmax(130px, 1fr));
 }
 
+.layout-grid.compact {
+  grid-template-columns: repeat(3, minmax(160px, 1fr));
+}
+
 .layout-summary {
   color: var(--muted);
   font-size: 13px;
   font-weight: 600;
+}
+
+.layout-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 14px 0;
 }
 
 .mode-help {
@@ -683,6 +694,29 @@ th {
   background: white;
   color: var(--ink);
   padding: 8px 10px;
+}
+
+.more-menu {
+  position: relative;
+}
+
+.more-menu-popover {
+  background: white;
+  border: 1px solid var(--line);
+  box-shadow: 0 18px 44px rgba(22, 32, 29, 0.14);
+  display: grid;
+  gap: 6px;
+  min-width: 150px;
+  padding: 8px;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 4;
+}
+
+.more-menu-popover a {
+  justify-content: flex-start;
+  white-space: nowrap;
 }
 
 .empty {
@@ -863,6 +897,91 @@ th {
 
   .creator-kiosk .template-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1024px) and (orientation: portrait) {
+  .admin-layout {
+    gap: 18px;
+    padding: 22px;
+  }
+
+  .settings-grid,
+  .printer-grid,
+  .layout-grid,
+  .layout-grid.compact,
+  .access-settings-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .section-title.split {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .order-toolbar {
+    justify-content: flex-start;
+  }
+
+  .table-wrap {
+    overflow: visible;
+  }
+
+  table {
+    min-width: 0;
+  }
+
+  table thead {
+    display: none;
+  }
+
+  table tbody {
+    display: grid;
+    gap: 12px;
+  }
+
+  table tr {
+    background: white;
+    border: 1px solid var(--line);
+    display: grid;
+    gap: 0;
+    padding: 10px;
+  }
+
+  table td {
+    align-items: center;
+    border-bottom: 1px solid rgba(216, 222, 214, 0.7);
+    display: flex;
+    justify-content: space-between;
+    min-height: 42px;
+  }
+
+  table td::before {
+    color: var(--muted);
+    content: "";
+    font-size: 12px;
+    font-weight: 700;
+    margin-right: 18px;
+  }
+
+  table td:nth-child(2)::before { content: "编号"; }
+  table td:nth-child(3)::before { content: "活动"; }
+  table td:nth-child(4)::before { content: "客户文字"; }
+  table td:nth-child(5)::before { content: "模板"; }
+  table td:nth-child(6)::before { content: "生成时间"; }
+  table td:nth-child(7)::before { content: "打印状态"; }
+  table td:nth-child(8)::before { content: "操作"; }
+
+  table td:first-child:empty {
+    display: none;
+  }
+
+  table td:last-child {
+    border-bottom: 0;
+  }
+
+  .actions {
+    justify-content: flex-end;
   }
 }
 

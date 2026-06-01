@@ -27,13 +27,15 @@ const sessionTtlMs = 1000 * 60 * 60 * 12;
 const inviteTtlMs = 1000 * 60 * 60 * 24;
 const staffUsername = process.env.LUGGAGE_TAG_STAFF_USER || "admin";
 const staffPassword = process.env.LUGGAGE_TAG_STAFF_PASSWORD || "admin123";
-const sessions = new Map();
-const invites = new Map();
 const loginFailures = new Map();
 const loginMaxFailures = Math.max(3, Number.parseInt(process.env.LUGGAGE_TAG_LOGIN_MAX_FAILURES ?? "5", 10) || 5);
 const loginLockMs = Math.max(60_000, Number.parseInt(process.env.LUGGAGE_TAG_LOGIN_LOCK_MS ?? "300000", 10) || 300_000);
 const backupIntervalMs = Math.max(60_000, Number.parseInt(process.env.LUGGAGE_TAG_BACKUP_INTERVAL_MS ?? "21600000", 10) || 21_600_000);
 const backupRetention = Math.max(1, Number.parseInt(process.env.LUGGAGE_TAG_BACKUP_RETENTION ?? "24", 10) || 24);
+const exportCleanupIntervalMs = Math.max(60_000, Number.parseInt(process.env.LUGGAGE_TAG_EXPORT_CLEANUP_INTERVAL_MS ?? "86400000", 10) || 86_400_000);
+const exportCleanupMinAgeMs = Math.max(60_000, Number.parseInt(process.env.LUGGAGE_TAG_EXPORT_CLEANUP_MIN_AGE_MS ?? "604800000", 10) || 604_800_000);
+const tokenCleanupIntervalMs = Math.max(60_000, Number.parseInt(process.env.LUGGAGE_TAG_TOKEN_CLEANUP_INTERVAL_MS ?? "3600000", 10) || 3_600_000);
+const forceSecureCookie = process.env.LUGGAGE_TAG_COOKIE_SECURE === "true";
 const allowedOrigins = String(process.env.LUGGAGE_TAG_ALLOW_ORIGIN ?? "")
   .split(",")
   .map((origin) => origin.trim())
@@ -72,6 +74,13 @@ db.exec(`
     digits INTEGER NOT NULL,
     created_at TEXT NOT NULL,
     is_active INTEGER NOT NULL DEFAULT 0
+  );
+
+  CREATE TABLE IF NOT EXISTS auth_tokens (
+    token_hash TEXT PRIMARY KEY,
+    type TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    created_at TEXT NOT NULL
   );
 `);
 
@@ -182,10 +191,30 @@ function ensureActiveEvent() {
   return activeEvent;
 }
 
+function migrateOrderFilePaths() {
+  const rows = db.prepare("SELECT id, png_path, pdf_path FROM orders").all();
+  const updates = [];
+  for (const order of rows) {
+    const nextPngPath = toRelativeExportPath(order.png_path);
+    const nextPdfPath = toRelativeExportPath(order.pdf_path);
+    if (nextPngPath !== order.png_path || nextPdfPath !== order.pdf_path) {
+      updates.push({ id: order.id, pngPath: nextPngPath, pdfPath: nextPdfPath });
+    }
+  }
+  for (const update of updates) {
+    db.prepare("UPDATE orders SET png_path = ?, pdf_path = ? WHERE id = ?").run(update.pngPath, update.pdfPath, update.id);
+  }
+}
+
 migrateOrdersTable();
 ensureActiveEvent();
+migrateOrderFilePaths();
 backupDatabase();
 setInterval(backupDatabase, backupIntervalMs).unref();
+cleanupExpiredTokens();
+setInterval(cleanupExpiredTokens, tokenCleanupIntervalMs).unref();
+cleanupExportFiles();
+setInterval(cleanupExportFiles, exportCleanupIntervalMs).unref();
 
 const app = express();
 app.use((req, res, next) => {
@@ -366,6 +395,68 @@ async function backupDatabase() {
   }
 }
 
+function normalizePathForCompare(value) {
+  return path.resolve(value).toLowerCase();
+}
+
+function toRelativeExportPath(filePath) {
+  if (!filePath) {
+    return filePath;
+  }
+  if (!path.isAbsolute(filePath)) {
+    return filePath.replace(/\\/g, "/");
+  }
+  const absolutePath = path.resolve(filePath);
+  const relativePath = path.relative(exportDir, absolutePath);
+  if (!relativePath.startsWith("..") && !path.isAbsolute(relativePath)) {
+    return path.join("exports", relativePath).replace(/\\/g, "/");
+  }
+  return filePath;
+}
+
+function resolveStoredFilePath(filePath) {
+  if (path.isAbsolute(filePath)) {
+    return filePath;
+  }
+  const normalizedPath = filePath.replace(/\\/g, "/");
+  if (normalizedPath.startsWith("exports/")) {
+    return path.join(dataDir, normalizedPath);
+  }
+  return path.join(exportDir, normalizedPath);
+}
+
+function getExportRelativePath(filename) {
+  return path.join("exports", filename).replace(/\\/g, "/");
+}
+
+async function cleanupExportFiles() {
+  try {
+    const rows = db.prepare("SELECT png_path, pdf_path FROM orders").all();
+    const usedPaths = new Set(
+      rows
+        .flatMap((order) => [order.png_path, order.pdf_path])
+        .filter(Boolean)
+        .map((filePath) => normalizePathForCompare(resolveStoredFilePath(filePath)))
+    );
+    const entries = await fs.readdir(exportDir, { withFileTypes: true });
+    const now = Date.now();
+    await Promise.allSettled(entries
+      .filter((entry) => entry.isFile())
+      .map(async (entry) => {
+        const filePath = path.join(exportDir, entry.name);
+        if (usedPaths.has(normalizePathForCompare(filePath))) {
+          return;
+        }
+        const stat = await fs.stat(filePath);
+        if (now - stat.mtimeMs >= exportCleanupMinAgeMs) {
+          await fs.unlink(filePath);
+        }
+      }));
+  } catch (error) {
+    console.error("Failed to cleanup export files", error);
+  }
+}
+
 function normalizeEventPayload(body) {
   const name = String(body.name ?? "").trim().slice(0, 80);
   const prefix = String(body.prefix ?? "No.").trim().slice(0, 12) || "No.";
@@ -402,53 +493,83 @@ function parseCookies(req) {
   );
 }
 
-function createToken(store, ttlMs) {
+function hashToken(token) {
+  return crypto.createHash("sha256").update(token).digest("hex");
+}
+
+function createToken(type, ttlMs) {
   const token = crypto.randomBytes(32).toString("hex");
-  store.set(token, Date.now() + ttlMs);
+  db.prepare("INSERT OR REPLACE INTO auth_tokens (token_hash, type, expires_at, created_at) VALUES (?, ?, ?, ?)").run(
+    hashToken(token),
+    type,
+    Date.now() + ttlMs,
+    new Date().toISOString()
+  );
   return token;
 }
 
-function isValidToken(store, token) {
-  const expiresAt = store.get(token);
-  if (!expiresAt) {
+function isValidToken(type, token) {
+  if (!token) {
     return false;
   }
-  if (expiresAt <= Date.now()) {
-    store.delete(token);
+  const tokenHash = hashToken(token);
+  const row = db.prepare("SELECT expires_at FROM auth_tokens WHERE token_hash = ? AND type = ?").get(tokenHash, type);
+  if (!row) {
+    return false;
+  }
+  if (Number(row.expires_at) <= Date.now()) {
+    db.prepare("DELETE FROM auth_tokens WHERE token_hash = ?").run(tokenHash);
     return false;
   }
   return true;
 }
 
-function setSessionCookie(res, token) {
+function deleteToken(type, token) {
+  if (token) {
+    db.prepare("DELETE FROM auth_tokens WHERE token_hash = ? AND type = ?").run(hashToken(token), type);
+  }
+}
+
+function cleanupExpiredTokens() {
+  db.prepare("DELETE FROM auth_tokens WHERE expires_at <= ?").run(Date.now());
+}
+
+function shouldUseSecureCookie(req) {
+  return forceSecureCookie || req.secure || req.headers["x-forwarded-proto"] === "https";
+}
+
+function setSessionCookie(req, res, token) {
   res.cookie(sessionCookieName, token, {
     httpOnly: true,
     maxAge: sessionTtlMs,
-    sameSite: "lax"
+    sameSite: "lax",
+    secure: shouldUseSecureCookie(req)
   });
 }
 
-function setInviteCookie(res, token) {
+function setInviteCookie(req, res, token) {
   res.cookie(inviteCookieName, token, {
     httpOnly: true,
     maxAge: inviteTtlMs,
-    sameSite: "lax"
+    sameSite: "lax",
+    secure: shouldUseSecureCookie(req)
   });
 }
 
-function clearAuthCookies(res) {
-  res.clearCookie(sessionCookieName, { sameSite: "lax" });
-  res.clearCookie(inviteCookieName, { sameSite: "lax" });
+function clearAuthCookies(req, res) {
+  const options = { sameSite: "lax", secure: shouldUseSecureCookie(req) };
+  res.clearCookie(sessionCookieName, options);
+  res.clearCookie(inviteCookieName, options);
 }
 
 function isStaffRequest(req) {
   const cookies = parseCookies(req);
-  return isValidToken(sessions, cookies[sessionCookieName]);
+  return isValidToken("staff", cookies[sessionCookieName]);
 }
 
 function isInviteRequest(req) {
   const cookies = parseCookies(req);
-  return isValidToken(invites, cookies[inviteCookieName]);
+  return isValidToken("invite", cookies[inviteCookieName]);
 }
 
 async function getAccessState(req) {
@@ -833,7 +954,7 @@ app.post("/api/auth/login", async (req, res) => {
     return res.status(401).json({ message: "账号或密码错误" });
   }
   clearLoginFailure(ip);
-  setSessionCookie(res, createToken(sessions, sessionTtlMs));
+  setSessionCookie(req, res, createToken("staff", sessionTtlMs));
   const settings = await getSettings();
   res.json({
     authenticated: true,
@@ -849,7 +970,7 @@ app.post("/api/auth/invite", async (req, res) => {
   if (settings.deploymentMode !== "invite" || !settings.inviteCode || inviteCode !== settings.inviteCode) {
     return res.status(401).json({ message: "邀请码无效" });
   }
-  setInviteCookie(res, createToken(invites, inviteTtlMs));
+  setInviteCookie(req, res, createToken("invite", inviteTtlMs));
   res.json({
     authenticated: false,
     invited: true,
@@ -860,9 +981,9 @@ app.post("/api/auth/invite", async (req, res) => {
 
 app.post("/api/auth/logout", async (req, res) => {
   const cookies = parseCookies(req);
-  sessions.delete(cookies[sessionCookieName]);
-  invites.delete(cookies[inviteCookieName]);
-  clearAuthCookies(res);
+  deleteToken("staff", cookies[sessionCookieName]);
+  deleteToken("invite", cookies[inviteCookieName]);
+  clearAuthCookies(req, res);
   res.json({ ok: true });
 });
 
@@ -1054,8 +1175,8 @@ app.post("/api/orders", requireCustomerAccess, async (req, res) => {
     const activeEvent = getActiveEvent();
     const orderNo = formatEventOrderNo(activeEvent);
     const safeName = `${orderNo}-${generatedAt}-${crypto.randomBytes(4).toString("hex")}`.replace(/[^a-zA-Z0-9_.-]/g, "_");
-    const pngPath = path.join(exportDir, `${safeName}.png`);
-    const pdfPath = path.join(exportDir, `${safeName}.pdf`);
+    const pngPath = getExportRelativePath(`${safeName}.png`);
+    const pdfPath = getExportRelativePath(`${safeName}.pdf`);
 
     const result = db.prepare(
       `INSERT INTO orders (event_id, order_no, template_id, customer_text, generated_at, print_status, png_path, pdf_path)
@@ -1085,10 +1206,10 @@ app.post("/api/orders", requireCustomerAccess, async (req, res) => {
   }
 
   try {
-    await fs.writeFile(created.pngPath, imageDataToBuffer(pngDataUrl));
+    await fs.writeFile(resolveStoredFilePath(created.pngPath), imageDataToBuffer(pngDataUrl));
     await createTicketPdf(
       { order_no: created.orderNo, customer_text: customerText, generated_at: created.generatedAt },
-      created.pdfPath
+      resolveStoredFilePath(created.pdfPath)
     );
   } catch (error) {
     db.prepare("DELETE FROM orders WHERE id = ?").run(created.id);
@@ -1179,7 +1300,7 @@ app.get("/api/orders/:id/download/:type", requireStaff, async (req, res) => {
     res.setHeader("Content-Disposition", `attachment; filename="${order.order_no}.pdf"`);
     return res.send(pdfBuffer);
   }
-  res.download(order.png_path, `${order.order_no}.png`);
+  res.download(resolveStoredFilePath(order.png_path), `${order.order_no}.png`);
 });
 
 app.get("/api/orders/:id/file/:type", requireStaff, async (req, res) => {
@@ -1195,7 +1316,7 @@ app.get("/api/orders/:id/file/:type", requireStaff, async (req, res) => {
     res.type("pdf");
     return res.send(createTicketPdfBuffer(order));
   }
-  const filePath = order.png_path;
+  const filePath = resolveStoredFilePath(order.png_path);
   res.type(type);
   res.sendFile(filePath);
 });

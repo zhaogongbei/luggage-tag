@@ -6,6 +6,7 @@ import {
   Home,
   LogIn,
   LogOut,
+  MoreHorizontal,
   Printer,
   RefreshCw,
   Settings,
@@ -14,7 +15,7 @@ import {
 import "./styles.css";
 
 const API_BASE = import.meta.env.DEV ? `${window.location.protocol}//${window.location.hostname}:3001` : "";
-const APP_VERSION = "V1.4.15";
+const APP_VERSION = "V1.4.16";
 const deploymentModes = [
   { value: "private", label: "Private", description: "仅员工登录后可使用定制页和后台" },
   { value: "invite", label: "Invite", description: "邀请码可访问定制页，后台仍需员工登录" },
@@ -39,6 +40,11 @@ const defaultLayoutOptions = {
   cropMarks: true,
   showOrderNo: true
 };
+const layoutPresets = [
+  { name: "A4 标准", options: { paperPreset: "A4", paperWidth: 210, paperHeight: 297, productWidth: 70, productHeight: 110, margin: 8, gap: 6 } },
+  { name: "A3 批量", options: { paperPreset: "A3", paperWidth: 297, paperHeight: 420, productWidth: 70, productHeight: 110, margin: 10, gap: 6 } },
+  { name: "A5 小版", options: { paperPreset: "A5", paperWidth: 148, paperHeight: 210, productWidth: 70, productHeight: 110, margin: 6, gap: 4 } }
+];
 
 function createEventFormFromSettings(settings) {
   return {
@@ -76,6 +82,7 @@ const templates = [
     textColor: "#F7F1E8"
   }
 ];
+const templateImageCache = new Map();
 
 function apiFetch(path, options = {}) {
   return fetch(`${API_BASE}${path}`, {
@@ -170,18 +177,34 @@ function drawTag(canvas, { template, customerText, orderNo, watermarkEnabled, ti
   }
 }
 
+function getTemplateImage(template) {
+  const cachedImage = templateImageCache.get(template.preview);
+  if (cachedImage) {
+    return cachedImage;
+  }
+  const image = new Image();
+  image.src = template.preview;
+  templateImageCache.set(template.preview, image);
+  return image;
+}
+
 function CanvasPreview({ template, customerText, orderNo, watermarkEnabled, timestamp, canvasRef, showMeta = true }) {
   useEffect(() => {
     let cancelled = false;
-    const image = new Image();
-    image.onload = () => {
+    const image = getTemplateImage(template);
+    function redraw() {
       if (!cancelled && canvasRef.current) {
         drawTag(canvasRef.current, { template, customerText, orderNo, watermarkEnabled, timestamp, image, showMeta });
       }
-    };
-    image.src = template.preview;
+    }
+    if (image.complete && image.naturalWidth) {
+      redraw();
+    } else {
+      image.addEventListener("load", redraw, { once: true });
+    }
     return () => {
       cancelled = true;
+      image.removeEventListener("load", redraw);
     };
   }, [template, customerText, orderNo, watermarkEnabled, timestamp, canvasRef, showMeta]);
 
@@ -469,6 +492,7 @@ function CustomerPage({ settings, previewNumber, onCreated, autoPrint = false, a
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("neutral");
   const [keyboardOpen, setKeyboardOpen] = useState(false);
+  const [isComposingName, setIsComposingName] = useState(false);
   const canvasRef = useRef(null);
   const inputRef = useRef(null);
   const actionPanelRef = useRef(null);
@@ -627,8 +651,13 @@ function CustomerPage({ settings, previewNumber, onCreated, autoPrint = false, a
             spellCheck="false"
             value={customerText}
             onBlur={blurNameInput}
+            onCompositionEnd={(event) => {
+              setIsComposingName(false);
+              setCustomerText(normalizeCustomerName(event.currentTarget.value));
+            }}
+            onCompositionStart={() => setIsComposingName(true)}
             onFocus={focusNameInput}
-            onChange={(event) => setCustomerText(normalizeCustomerName(event.target.value))}
+            onChange={(event) => setCustomerText(event.nativeEvent.isComposing || isComposingName ? event.target.value : normalizeCustomerName(event.target.value))}
             placeholder="MARISSA"
           />
         </label>
@@ -761,6 +790,8 @@ function AdminPage({ settings, onSettingsSaved }) {
   const [layoutOptions, setLayoutOptions] = useState(defaultLayoutOptions);
   const [layoutPreview, setLayoutPreview] = useState(null);
   const [showDeletedOrders, setShowDeletedOrders] = useState(false);
+  const [showAdvancedLayout, setShowAdvancedLayout] = useState(false);
+  const [openOrderMenuId, setOpenOrderMenuId] = useState(null);
 
   useEffect(() => {
     setForm(settings);
@@ -901,6 +932,17 @@ function AdminPage({ settings, onSettingsSaved }) {
       }
       return nextOptions;
     });
+  }
+
+  function applyLayoutPreset(preset) {
+    setLayoutOptions((options) => ({
+      ...options,
+      ...preset.options,
+      autoRotate: true,
+      cropMarks: true,
+      showOrderNo: true
+    }));
+    setShowAdvancedLayout(false);
   }
 
   async function downloadImpositionPdf() {
@@ -1155,7 +1197,17 @@ function AdminPage({ settings, onSettingsSaved }) {
                 : "计算中"}
           </strong>
         </div>
-        <div className="layout-grid">
+        <div className="layout-presets">
+          {layoutPresets.map((preset) => (
+            <button className="secondary-btn inline" key={preset.name} onClick={() => applyLayoutPreset(preset)} type="button">
+              {preset.name}
+            </button>
+          ))}
+          <button className="secondary-btn inline" onClick={() => setShowAdvancedLayout((value) => !value)} type="button">
+            {showAdvancedLayout ? "收起高级项" : "高级参数"}
+          </button>
+        </div>
+        <div className={`layout-grid ${showAdvancedLayout ? "" : "compact"}`}>
           <label className="field">
             <span>纸张</span>
             <select value={layoutOptions.paperPreset} onChange={(event) => updateLayoutOption("paperPreset", event.target.value)}>
@@ -1185,34 +1237,34 @@ function AdminPage({ settings, onSettingsSaved }) {
               onChange={(event) => updateLayoutOption("paperHeight", event.target.value)}
             />
           </label>
-          <label className="field">
+          {showAdvancedLayout && <label className="field">
             <span>成品宽 mm</span>
             <input min="5" type="number" value={layoutOptions.productWidth} onChange={(event) => updateLayoutOption("productWidth", event.target.value)} />
-          </label>
-          <label className="field">
+          </label>}
+          {showAdvancedLayout && <label className="field">
             <span>成品高 mm</span>
             <input min="5" type="number" value={layoutOptions.productHeight} onChange={(event) => updateLayoutOption("productHeight", event.target.value)} />
-          </label>
-          <label className="field">
+          </label>}
+          {showAdvancedLayout && <label className="field">
             <span>最小边距 mm</span>
             <input min="0" type="number" value={layoutOptions.margin} onChange={(event) => updateLayoutOption("margin", event.target.value)} />
-          </label>
-          <label className="field">
+          </label>}
+          {showAdvancedLayout && <label className="field">
             <span>间距 mm</span>
             <input min="0" type="number" value={layoutOptions.gap} onChange={(event) => updateLayoutOption("gap", event.target.value)} />
-          </label>
-          <label className="toggle">
+          </label>}
+          {showAdvancedLayout && <label className="toggle">
             <input checked={layoutOptions.autoRotate} onChange={(event) => updateLayoutOption("autoRotate", event.target.checked)} type="checkbox" />
             <span>自动旋转优化</span>
-          </label>
-          <label className="toggle">
+          </label>}
+          {showAdvancedLayout && <label className="toggle">
             <input checked={layoutOptions.cropMarks} onChange={(event) => updateLayoutOption("cropMarks", event.target.checked)} type="checkbox" />
             <span>生成裁切线</span>
-          </label>
-          <label className="toggle">
+          </label>}
+          {showAdvancedLayout && <label className="toggle">
             <input checked={layoutOptions.showOrderNo} onChange={(event) => updateLayoutOption("showOrderNo", event.target.checked)} type="checkbox" />
             <span>下方显示编号</span>
-          </label>
+          </label>}
         </div>
       </section>
 
@@ -1301,16 +1353,26 @@ function AdminPage({ settings, onSettingsSaved }) {
                           <Printer size={17} />
                           打印
                         </button>
-                        <a href={`${API_BASE}/api/orders/${order.id}/download/png`} title="下载 PNG">
-                          <Download size={17} /> PNG
-                        </a>
-                        <a href={`${API_BASE}/api/orders/${order.id}/download/pdf`} title="下载 PDF">
-                          <Download size={17} /> PDF
-                        </a>
                         <button onClick={() => togglePrinted(order)} title="重新打印不增加编号" type="button">
                           <CheckCircle2 size={17} />
                           {order.print_status === "printed" ? "标记待打" : "标记已打"}
                         </button>
+                        <div className="more-menu">
+                          <button onClick={() => setOpenOrderMenuId(openOrderMenuId === order.id ? null : order.id)} title="更多操作" type="button">
+                            <MoreHorizontal size={17} />
+                            更多
+                          </button>
+                          {openOrderMenuId === order.id && (
+                            <div className="more-menu-popover">
+                              <a href={`${API_BASE}/api/orders/${order.id}/download/png`} title="下载 PNG">
+                                <Download size={17} /> 下载 PNG
+                              </a>
+                              <a href={`${API_BASE}/api/orders/${order.id}/download/pdf`} title="下载 PDF">
+                                <Download size={17} /> 下载 PDF
+                              </a>
+                            </div>
+                          )}
+                        </div>
                         <button onClick={() => deleteOrder(order)} title="删除订单不影响编号" type="button">
                           <Trash2 size={17} />
                           删除
