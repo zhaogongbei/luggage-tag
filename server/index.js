@@ -900,18 +900,17 @@ app.post("/api/orders", requireCustomerAccess, async (req, res) => {
     return res.status(400).json({ message: "Customer name must contain 1-12 English letters only" });
   }
 
+  let created;
   try {
+    const generatedAt = new Date().toISOString();
     db.exec("BEGIN IMMEDIATE TRANSACTION");
     const activeEvent = getActiveEvent();
     const orderNo = formatEventOrderNo(activeEvent);
-    const generatedAt = new Date().toISOString();
     const safeName = `${orderNo}-${generatedAt}-${crypto.randomBytes(4).toString("hex")}`.replace(/[^a-zA-Z0-9_.-]/g, "_");
     const pngPath = path.join(exportDir, `${safeName}.png`);
     const pdfPath = path.join(exportDir, `${safeName}.pdf`);
 
-    await fs.writeFile(pngPath, imageDataToBuffer(pngDataUrl));
-    await createTicketPdf({ order_no: orderNo, customer_text: customerText, generated_at: generatedAt }, pdfPath);
-    db.prepare(
+    const result = db.prepare(
       `INSERT INTO orders (event_id, order_no, template_id, customer_text, generated_at, print_status, png_path, pdf_path)
        VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)`
     ).run(
@@ -927,8 +926,7 @@ app.post("/api/orders", requireCustomerAccess, async (req, res) => {
     db.prepare("UPDATE events SET current_number = ? WHERE id = ?").run(nextNumber, activeEvent.id);
     syncLegacyNumberSettings({ ...activeEvent, current_number: nextNumber });
     db.exec("COMMIT");
-    const order = db.prepare("SELECT id FROM orders WHERE event_id = ? AND order_no = ? ORDER BY id DESC LIMIT 1").get(activeEvent.id, orderNo);
-    res.status(201).json({ id: order.id, orderNo, generatedAt });
+    created = { id: result.lastInsertRowid, orderNo, generatedAt, pngPath, pdfPath };
   } catch (error) {
     try {
       db.exec("ROLLBACK");
@@ -936,8 +934,21 @@ app.post("/api/orders", requireCustomerAccess, async (req, res) => {
       // no active transaction
     }
     console.error(error);
-    res.status(500).json({ message: "Failed to create order" });
+    return res.status(500).json({ message: "Failed to create order" });
   }
+
+  try {
+    await fs.writeFile(created.pngPath, imageDataToBuffer(pngDataUrl));
+    await createTicketPdf(
+      { order_no: created.orderNo, customer_text: customerText, generated_at: created.generatedAt },
+      created.pdfPath
+    );
+  } catch (error) {
+    db.prepare("DELETE FROM orders WHERE id = ?").run(created.id);
+    console.error(error);
+    return res.status(500).json({ message: "Failed to save order files" });
+  }
+  res.status(201).json({ id: created.id, orderNo: created.orderNo, generatedAt: created.generatedAt });
 });
 
 app.patch("/api/orders/:id/print-status", requireStaff, async (req, res) => {
