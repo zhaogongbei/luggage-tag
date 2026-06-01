@@ -440,7 +440,7 @@ input[type="checkbox"] {
 }
 
 .creator-kiosk.keyboard-open .creator-action-panel {
-  transform: translateY(calc(-1 * max(28px, min(22dvh, calc(var(--keyboard-height, 0px) * 0.45)))));
+  transform: translateY(calc(-1 * max(44px, min(48dvh, max(var(--keyboard-shift, 0px), calc(var(--keyboard-height, 0px) * 0.72))))));
 }
 
 @supports not (height: 100dvh) {

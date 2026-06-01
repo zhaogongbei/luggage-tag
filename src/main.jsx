@@ -14,7 +14,7 @@ import {
 import "./styles.css";
 
 const API_BASE = import.meta.env.DEV ? `${window.location.protocol}//${window.location.hostname}:3001` : "";
-const APP_VERSION = "V1.4.14";
+const APP_VERSION = "V1.4.15";
 const deploymentModes = [
   { value: "private", label: "Private", description: "仅员工登录后可使用定制页和后台" },
   { value: "invite", label: "Invite", description: "邀请码可访问定制页，后台仍需员工登录" },
@@ -471,6 +471,7 @@ function CustomerPage({ settings, previewNumber, onCreated, autoPrint = false, a
   const [keyboardOpen, setKeyboardOpen] = useState(false);
   const canvasRef = useRef(null);
   const inputRef = useRef(null);
+  const actionPanelRef = useRef(null);
   const template = templates.find((item) => item.id === templateId);
   const timestamp = useMemo(() => new Date(), [customerText, templateId, previewNumber]);
   const normalizedName = normalizeCustomerName(customerText);
@@ -484,8 +485,16 @@ function CustomerPage({ settings, previewNumber, onCreated, autoPrint = false, a
     const initialHeight = viewport.height;
     function updateKeyboardState() {
       const keyboardHeight = Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop);
+      const isInputActive = document.activeElement === inputRef.current;
+      const actionPanelBottom = actionPanelRef.current?.getBoundingClientRect().bottom ?? 0;
+      const visualBottom = viewport.offsetTop + viewport.height - 18;
+      const overflow = isInputActive ? Math.max(0, actionPanelBottom - visualBottom) : 0;
+      const keyboardShift = isInputActive && keyboardHeight > 80
+        ? Math.round(Math.min(window.innerHeight * 0.48, overflow + keyboardHeight * 0.32 + 24))
+        : 0;
       document.documentElement.style.setProperty("--keyboard-height", `${Math.round(keyboardHeight)}px`);
-      setKeyboardOpen(document.activeElement === inputRef.current && keyboardHeight > 80);
+      document.documentElement.style.setProperty("--keyboard-shift", `${keyboardShift}px`);
+      setKeyboardOpen(isInputActive && keyboardHeight > 80);
     }
     viewport.addEventListener("resize", updateKeyboardState);
     viewport.addEventListener("scroll", updateKeyboardState);
@@ -495,6 +504,7 @@ function CustomerPage({ settings, previewNumber, onCreated, autoPrint = false, a
       viewport.removeEventListener("resize", updateKeyboardState);
       viewport.removeEventListener("scroll", updateKeyboardState);
       document.documentElement.style.removeProperty("--keyboard-height");
+      document.documentElement.style.removeProperty("--keyboard-shift");
       document.documentElement.style.removeProperty("--initial-viewport-height");
     };
   }, []);
@@ -579,6 +589,7 @@ function CustomerPage({ settings, previewNumber, onCreated, autoPrint = false, a
 
       <form
         className="creator-action-panel"
+        ref={actionPanelRef}
         onSubmit={(event) => {
           event.preventDefault();
           submitOrder();
@@ -749,6 +760,7 @@ function AdminPage({ settings, onSettingsSaved }) {
   const [selectedOrderIds, setSelectedOrderIds] = useState([]);
   const [layoutOptions, setLayoutOptions] = useState(defaultLayoutOptions);
   const [layoutPreview, setLayoutPreview] = useState(null);
+  const [showDeletedOrders, setShowDeletedOrders] = useState(false);
 
   useEffect(() => {
     setForm(settings);
@@ -756,7 +768,7 @@ function AdminPage({ settings, onSettingsSaved }) {
   }, [settings]);
 
   async function loadOrders() {
-    const response = await apiFetch("/api/orders");
+    const response = await apiFetch(`/api/orders${showDeletedOrders ? "?deleted=true" : ""}`);
     const nextOrders = await response.json();
     setOrders(nextOrders);
     setSelectedOrderIds((ids) => ids.filter((id) => nextOrders.some((order) => order.id === id)));
@@ -778,6 +790,10 @@ function AdminPage({ settings, onSettingsSaved }) {
   }, []);
 
   useEffect(() => {
+    loadOrders();
+  }, [showDeletedOrders]);
+
+  useEffect(() => {
     async function loadLayoutPreview() {
       try {
         const response = await apiFetch("/api/layout/preview", {
@@ -794,6 +810,12 @@ function AdminPage({ settings, onSettingsSaved }) {
   }, [layoutOptions]);
 
   async function saveSettings() {
+    if (
+      Number(form.currentNumber) < Number(settings.currentNumber) &&
+      !window.confirm(`当前编号将从 ${settings.currentNumber} 调低到 ${form.currentNumber}，可能造成编号重复。确认继续？`)
+    ) {
+      return;
+    }
     const response = await apiFetch("/api/settings", {
       method: "PUT",
       body: JSON.stringify(form)
@@ -830,7 +852,7 @@ function AdminPage({ settings, onSettingsSaved }) {
   }
 
   async function deleteOrder(order) {
-    if (!window.confirm(`确认删除订单 ${order.order_no}？删除不会影响当前编号。`)) {
+    if (!window.confirm(`确认将订单 ${order.order_no} 移入回收站？文件会保留，删除不会影响当前编号。`)) {
       return;
     }
     const response = await apiFetch(`/api/orders/${order.id}`, { method: "DELETE" });
@@ -840,6 +862,17 @@ function AdminPage({ settings, onSettingsSaved }) {
       return;
     }
     setSelectedOrderIds((ids) => ids.filter((id) => id !== order.id));
+    loadOrders();
+  }
+
+  async function restoreOrder(order) {
+    const response = await apiFetch(`/api/orders/${order.id}/restore`, { method: "PATCH" });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      setPrinterMessage(data.message || "订单恢复失败");
+      return;
+    }
+    setPrinterMessage(`订单 ${order.order_no} 已恢复`);
     loadOrders();
   }
 
@@ -1185,17 +1218,25 @@ function AdminPage({ settings, onSettingsSaved }) {
 
       <section className="panel orders-panel">
         <div className="section-title split">
-          <span>订单列表</span>
+          <span>{showDeletedOrders ? "订单回收站" : "订单列表"}</span>
           <div className="order-toolbar">
-            <strong>{selectedOrderIds.length} 已选</strong>
-            <button className="secondary-btn inline" onClick={downloadImpositionPdf} type="button">
-              <Download size={18} />
-              生成拼版PDF
+            {!showDeletedOrders && <strong>{selectedOrderIds.length} 已选</strong>}
+            <button className="secondary-btn inline" onClick={() => setShowDeletedOrders((value) => !value)} type="button">
+              <Trash2 size={18} />
+              {showDeletedOrders ? "返回订单" : "回收站"}
             </button>
-            <button className="secondary-btn inline" onClick={openImpositionPrintPage} type="button">
-              <Printer size={18} />
-              拼版打印
-            </button>
+            {!showDeletedOrders && (
+              <>
+                <button className="secondary-btn inline" onClick={downloadImpositionPdf} type="button">
+                  <Download size={18} />
+                  生成拼版PDF
+                </button>
+                <button className="secondary-btn inline" onClick={openImpositionPrintPage} type="button">
+                  <Printer size={18} />
+                  拼版打印
+                </button>
+              </>
+            )}
             <button className="icon-btn" onClick={loadOrders} title="刷新" type="button">
               <RefreshCw size={18} />
             </button>
@@ -1206,15 +1247,17 @@ function AdminPage({ settings, onSettingsSaved }) {
             <thead>
               <tr>
                 <th>
-                  <input
-                    aria-label="选择所有待打印订单"
-                    checked={
-                      orders.some((order) => order.print_status !== "printed") &&
-                      orders.filter((order) => order.print_status !== "printed").every((order) => selectedOrderIds.includes(order.id))
-                    }
-                    onChange={toggleAllPendingOrders}
-                    type="checkbox"
-                  />
+                  {!showDeletedOrders && (
+                    <input
+                      aria-label="选择所有待打印订单"
+                      checked={
+                        orders.some((order) => order.print_status !== "printed") &&
+                        orders.filter((order) => order.print_status !== "printed").every((order) => selectedOrderIds.includes(order.id))
+                      }
+                      onChange={toggleAllPendingOrders}
+                      type="checkbox"
+                    />
+                  )}
                 </th>
                 <th>编号</th>
                 <th>活动</th>
@@ -1229,12 +1272,14 @@ function AdminPage({ settings, onSettingsSaved }) {
               {orders.map((order) => (
                 <tr key={order.id}>
                   <td>
-                    <input
-                      aria-label={`选择 ${order.order_no}`}
-                      checked={selectedOrderIds.includes(order.id)}
-                      onChange={() => toggleOrderSelection(order.id)}
-                      type="checkbox"
-                    />
+                    {!showDeletedOrders && (
+                      <input
+                        aria-label={`选择 ${order.order_no}`}
+                        checked={selectedOrderIds.includes(order.id)}
+                        onChange={() => toggleOrderSelection(order.id)}
+                        type="checkbox"
+                      />
+                    )}
                   </td>
                   <td>{order.order_no}</td>
                   <td>{order.event_name ? `${order.event_name}${order.event_date ? ` / ${order.event_date}` : ""}` : "-"}</td>
@@ -1245,24 +1290,33 @@ function AdminPage({ settings, onSettingsSaved }) {
                     <span className={`status ${order.print_status}`}>{order.print_status === "printed" ? "已打印" : "待打印"}</span>
                   </td>
                   <td className="actions">
-                    <button onClick={() => openPrintPreview(order)} title="打开浏览器打印预览" type="button">
-                      <Printer size={17} />
-                      打印
-                    </button>
-                    <a href={`${API_BASE}/api/orders/${order.id}/download/png`} title="下载 PNG">
-                      <Download size={17} /> PNG
-                    </a>
-                    <a href={`${API_BASE}/api/orders/${order.id}/download/pdf`} title="下载 PDF">
-                      <Download size={17} /> PDF
-                    </a>
-                    <button onClick={() => togglePrinted(order)} title="重新打印不增加编号" type="button">
-                      <CheckCircle2 size={17} />
-                      {order.print_status === "printed" ? "标记待打" : "标记已打"}
-                    </button>
-                    <button onClick={() => deleteOrder(order)} title="删除订单不影响编号" type="button">
-                      <Trash2 size={17} />
-                      删除
-                    </button>
+                    {showDeletedOrders ? (
+                      <button onClick={() => restoreOrder(order)} title="恢复订单" type="button">
+                        <RefreshCw size={17} />
+                        恢复
+                      </button>
+                    ) : (
+                      <>
+                        <button onClick={() => openPrintPreview(order)} title="打开浏览器打印预览" type="button">
+                          <Printer size={17} />
+                          打印
+                        </button>
+                        <a href={`${API_BASE}/api/orders/${order.id}/download/png`} title="下载 PNG">
+                          <Download size={17} /> PNG
+                        </a>
+                        <a href={`${API_BASE}/api/orders/${order.id}/download/pdf`} title="下载 PDF">
+                          <Download size={17} /> PDF
+                        </a>
+                        <button onClick={() => togglePrinted(order)} title="重新打印不增加编号" type="button">
+                          <CheckCircle2 size={17} />
+                          {order.print_status === "printed" ? "标记待打" : "标记已打"}
+                        </button>
+                        <button onClick={() => deleteOrder(order)} title="删除订单不影响编号" type="button">
+                          <Trash2 size={17} />
+                          删除
+                        </button>
+                      </>
+                    )}
                   </td>
                 </tr>
               ))}

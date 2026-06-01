@@ -16,6 +16,7 @@ const dataDir = process.env.LUGGAGE_TAG_DATA_DIR
   ? path.resolve(process.env.LUGGAGE_TAG_DATA_DIR)
   : path.join(rootDir, "data");
 const exportDir = path.join(dataDir, "exports");
+const backupDir = path.join(dataDir, "backups");
 const dbPath = path.join(dataDir, "luggage-tag.sqlite");
 const port = Number(process.env.PORT || 3001);
 const host = process.env.LUGGAGE_TAG_HOST || process.env.HOST || "127.0.0.1";
@@ -28,8 +29,18 @@ const staffUsername = process.env.LUGGAGE_TAG_STAFF_USER || "admin";
 const staffPassword = process.env.LUGGAGE_TAG_STAFF_PASSWORD || "admin123";
 const sessions = new Map();
 const invites = new Map();
+const loginFailures = new Map();
+const loginMaxFailures = Math.max(3, Number.parseInt(process.env.LUGGAGE_TAG_LOGIN_MAX_FAILURES ?? "5", 10) || 5);
+const loginLockMs = Math.max(60_000, Number.parseInt(process.env.LUGGAGE_TAG_LOGIN_LOCK_MS ?? "300000", 10) || 300_000);
+const backupIntervalMs = Math.max(60_000, Number.parseInt(process.env.LUGGAGE_TAG_BACKUP_INTERVAL_MS ?? "21600000", 10) || 21_600_000);
+const backupRetention = Math.max(1, Number.parseInt(process.env.LUGGAGE_TAG_BACKUP_RETENTION ?? "24", 10) || 24);
+const allowedOrigins = String(process.env.LUGGAGE_TAG_ALLOW_ORIGIN ?? "")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 
 await fs.mkdir(exportDir, { recursive: true });
+await fs.mkdir(backupDir, { recursive: true });
 
 const db = new DatabaseSync(dbPath);
 
@@ -48,7 +59,8 @@ db.exec(`
     generated_at TEXT NOT NULL,
     print_status TEXT NOT NULL DEFAULT 'pending',
     png_path TEXT NOT NULL,
-    pdf_path TEXT NOT NULL
+    pdf_path TEXT NOT NULL,
+    deleted_at TEXT
   );
 
   CREATE TABLE IF NOT EXISTS events (
@@ -98,6 +110,10 @@ for (const [key, value] of Object.entries(defaultSettings)) {
   db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)").run(key, value);
 }
 
+if (!process.env.LUGGAGE_TAG_STAFF_PASSWORD || staffPassword === "admin123") {
+  console.warn("SECURITY WARNING: LUGGAGE_TAG_STAFF_PASSWORD is not set. Default password admin123 is unsafe for public deployment.");
+}
+
 function hasColumn(tableName, columnName) {
   return db.prepare(`PRAGMA table_info(${tableName})`).all().some((column) => column.name === columnName);
 }
@@ -105,9 +121,10 @@ function hasColumn(tableName, columnName) {
 function migrateOrdersTable() {
   const orderTable = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'orders'").get();
   const needsEventColumn = !hasColumn("orders", "event_id");
+  const needsDeletedAtColumn = !hasColumn("orders", "deleted_at");
   const hasGlobalUniqueOrderNo = /\border_no\s+TEXT\s+NOT\s+NULL\s+UNIQUE\b/i.test(orderTable?.sql ?? "");
 
-  if (!needsEventColumn && !hasGlobalUniqueOrderNo) {
+  if (!needsEventColumn && !needsDeletedAtColumn && !hasGlobalUniqueOrderNo) {
     return;
   }
 
@@ -123,13 +140,15 @@ function migrateOrdersTable() {
         generated_at TEXT NOT NULL,
         print_status TEXT NOT NULL DEFAULT 'pending',
         png_path TEXT NOT NULL,
-        pdf_path TEXT NOT NULL
+        pdf_path TEXT NOT NULL,
+        deleted_at TEXT
       );
     `);
     const eventColumn = needsEventColumn ? "NULL AS event_id" : "event_id";
+    const deletedAtColumn = needsDeletedAtColumn ? "NULL AS deleted_at" : "deleted_at";
     db.exec(`
-      INSERT INTO orders_next (id, event_id, order_no, template_id, customer_text, generated_at, print_status, png_path, pdf_path)
-      SELECT id, ${eventColumn}, order_no, template_id, customer_text, generated_at, print_status, png_path, pdf_path
+      INSERT INTO orders_next (id, event_id, order_no, template_id, customer_text, generated_at, print_status, png_path, pdf_path, deleted_at)
+      SELECT id, ${eventColumn}, order_no, template_id, customer_text, generated_at, print_status, png_path, pdf_path, ${deletedAtColumn}
       FROM orders;
       DROP TABLE orders;
       ALTER TABLE orders_next RENAME TO orders;
@@ -165,9 +184,22 @@ function ensureActiveEvent() {
 
 migrateOrdersTable();
 ensureActiveEvent();
+backupDatabase();
+setInterval(backupDatabase, backupIntervalMs).unref();
 
 const app = express();
-app.use(cors({ origin: true, credentials: true }));
+app.use((req, res, next) => {
+  if (!isAllowedOrigin(req.headers.origin, req)) {
+    return res.status(403).json({ message: "CORS origin not allowed" });
+  }
+  next();
+});
+app.use(cors((req, callback) => {
+  callback(null, {
+    credentials: true,
+    origin: true
+  });
+}));
 app.use(express.json({ limit: "12mb" }));
 
 if (process.env.NODE_ENV === "production") {
@@ -235,6 +267,103 @@ function syncLegacyNumberSettings(event) {
   db.prepare("UPDATE settings SET value = ? WHERE key = 'prefix'").run(event.prefix);
   db.prepare("UPDATE settings SET value = ? WHERE key = 'currentNumber'").run(String(event.current_number));
   db.prepare("UPDATE settings SET value = ? WHERE key = 'digits'").run(String(event.digits));
+}
+
+function getRequestIp(req) {
+  return String(req.headers["x-forwarded-for"] ?? req.socket.remoteAddress ?? "unknown").split(",")[0].trim();
+}
+
+function getLoginFailure(req) {
+  const ip = getRequestIp(req);
+  const failure = loginFailures.get(ip) ?? { count: 0, lockedUntil: 0 };
+  if (failure.lockedUntil && failure.lockedUntil <= Date.now()) {
+    loginFailures.delete(ip);
+    return { ip, failure: { count: 0, lockedUntil: 0 } };
+  }
+  return { ip, failure };
+}
+
+function recordLoginFailure(ip, failure) {
+  const nextFailure = {
+    count: failure.count + 1,
+    lockedUntil: 0
+  };
+  if (nextFailure.count >= loginMaxFailures) {
+    nextFailure.lockedUntil = Date.now() + loginLockMs;
+  }
+  loginFailures.set(ip, nextFailure);
+  return nextFailure;
+}
+
+function clearLoginFailure(ip) {
+  loginFailures.delete(ip);
+}
+
+function isAllowedOrigin(origin, req) {
+  if (!origin) {
+    return true;
+  }
+  if (allowedOrigins.includes(origin)) {
+    return true;
+  }
+  let parsed;
+  try {
+    parsed = new URL(origin);
+  } catch {
+    return false;
+  }
+  const requestHost = String(req.headers.host ?? "").split(":")[0];
+  if (requestHost && parsed.hostname === requestHost) {
+    return true;
+  }
+  const hostname = parsed.hostname;
+  if (["localhost", "127.0.0.1", "::1"].includes(hostname)) {
+    return true;
+  }
+  if (/^192\.168\.\d{1,3}\.\d{1,3}$/.test(hostname)) {
+    return true;
+  }
+  if (/^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname)) {
+    return true;
+  }
+  if (/^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(hostname)) {
+    return true;
+  }
+  return false;
+}
+
+function createTimestampForFilename(date = new Date()) {
+  const pad = (value) => String(value).padStart(2, "0");
+  return [
+    date.getFullYear(),
+    pad(date.getMonth() + 1),
+    pad(date.getDate()),
+    "-",
+    pad(date.getHours()),
+    pad(date.getMinutes())
+  ].join("");
+}
+
+async function cleanupBackups() {
+  const entries = await fs.readdir(backupDir, { withFileTypes: true });
+  const backups = entries
+    .filter((entry) => entry.isFile() && /^luggage-tag-\d{8}-\d{4}\.sqlite$/.test(entry.name))
+    .map((entry) => entry.name)
+    .sort()
+    .reverse();
+  await Promise.allSettled(
+    backups.slice(backupRetention).map((name) => fs.unlink(path.join(backupDir, name)))
+  );
+}
+
+async function backupDatabase() {
+  try {
+    const filename = `luggage-tag-${createTimestampForFilename()}.sqlite`;
+    await fs.copyFile(dbPath, path.join(backupDir, filename));
+    await cleanupBackups();
+  } catch (error) {
+    console.error("Failed to backup SQLite database", error);
+  }
 }
 
 function normalizeEventPayload(body) {
@@ -417,17 +546,21 @@ function toPublicOrder(order) {
     template_id: order.template_id,
     customer_text: order.customer_text,
     generated_at: order.generated_at,
-    print_status: order.print_status
+    print_status: order.print_status,
+    deleted_at: order.deleted_at ?? ""
   };
 }
 
-function getOrderById(orderId) {
-  return db.prepare(`
+function getOrderById(orderId, options = {}) {
+  const includeDeleted = Boolean(options.includeDeleted);
+  const sql = `
     SELECT orders.*, events.name AS event_name, events.event_date AS event_date
     FROM orders
     LEFT JOIN events ON events.id = orders.event_id
     WHERE orders.id = ?
-  `).get(orderId);
+    ${includeDeleted ? "" : "AND orders.deleted_at IS NULL"}
+  `;
+  return db.prepare(sql).get(orderId);
 }
 
 function parseOrderIds(value) {
@@ -447,6 +580,7 @@ function getOrdersByIds(orderIds) {
     FROM orders
     LEFT JOIN events ON events.id = orders.event_id
     WHERE orders.id IN (${placeholders})
+      AND orders.deleted_at IS NULL
   `).all(...orderIds);
   const byId = new Map(rows.map((order) => [order.id, order]));
   return orderIds.map((id) => byId.get(id)).filter(Boolean);
@@ -685,9 +819,20 @@ app.get("/api/auth/status", async (req, res) => {
 app.post("/api/auth/login", async (req, res) => {
   const username = String(req.body.username ?? "");
   const password = String(req.body.password ?? "");
+  const { ip, failure } = getLoginFailure(req);
+  if (failure.lockedUntil > Date.now()) {
+    const retrySeconds = Math.ceil((failure.lockedUntil - Date.now()) / 1000);
+    return res.status(429).json({ message: `登录失败次数过多，请 ${retrySeconds} 秒后再试` });
+  }
   if (username !== staffUsername || password !== staffPassword) {
+    const nextFailure = recordLoginFailure(ip, failure);
+    if (nextFailure.lockedUntil > Date.now()) {
+      const retrySeconds = Math.ceil((nextFailure.lockedUntil - Date.now()) / 1000);
+      return res.status(429).json({ message: `登录失败次数过多，请 ${retrySeconds} 秒后再试` });
+    }
     return res.status(401).json({ message: "账号或密码错误" });
   }
+  clearLoginFailure(ip);
   setSessionCookie(res, createToken(sessions, sessionTtlMs));
   const settings = await getSettings();
   res.json({
@@ -788,11 +933,13 @@ app.get("/api/preview-number", requireCustomerAccess, async (_req, res) => {
   res.json({ orderNo: formatEventOrderNo(activeEvent), settings: toClientSettings(settings) });
 });
 
-app.get("/api/orders", requireStaff, async (_req, res) => {
+app.get("/api/orders", requireStaff, async (req, res) => {
+  const includeDeleted = req.query.deleted === "true";
   const rows = db.prepare(`
     SELECT orders.*, events.name AS event_name, events.event_date AS event_date
     FROM orders
     LEFT JOIN events ON events.id = orders.event_id
+    WHERE ${includeDeleted ? "orders.deleted_at IS NOT NULL" : "orders.deleted_at IS NULL"}
     ORDER BY orders.id DESC
   `).all();
   res.json(rows.map(toPublicOrder));
@@ -872,7 +1019,7 @@ app.get("/api/orders/batch", requireStaff, async (req, res) => {
 });
 
 app.get("/api/orders/:id", requireStaff, async (req, res) => {
-  const order = getOrderById(req.params.id);
+  const order = getOrderById(req.params.id, { includeDeleted: true });
   if (!order) {
     return res.status(404).json({ message: "Order not found" });
   }
@@ -880,7 +1027,7 @@ app.get("/api/orders/:id", requireStaff, async (req, res) => {
 });
 
 app.get("/api/orders/:id/ticket", requireCustomerAccess, async (req, res) => {
-  const order = getOrderById(req.params.id);
+  const order = getOrderById(req.params.id, { includeDeleted: true });
   if (!order) {
     return res.status(404).json({ message: "Order not found" });
   }
@@ -953,22 +1100,30 @@ app.post("/api/orders", requireCustomerAccess, async (req, res) => {
 
 app.patch("/api/orders/:id/print-status", requireStaff, async (req, res) => {
   const status = req.body.printStatus === "printed" ? "printed" : "pending";
-  db.prepare("UPDATE orders SET print_status = ? WHERE id = ?").run(status, req.params.id);
-  const order = db.prepare("SELECT * FROM orders WHERE id = ?").get(req.params.id);
+  db.prepare("UPDATE orders SET print_status = ? WHERE id = ? AND deleted_at IS NULL").run(status, req.params.id);
+  const order = getOrderById(req.params.id);
+  if (!order) {
+    return res.status(404).json({ message: "Order not found" });
+  }
   res.json(toPublicOrder(order));
 });
 
 app.delete("/api/orders/:id", requireStaff, async (req, res) => {
-  const order = db.prepare("SELECT * FROM orders WHERE id = ?").get(req.params.id);
+  const order = getOrderById(req.params.id);
   if (!order) {
     return res.status(404).json({ message: "Order not found" });
   }
-  db.prepare("DELETE FROM orders WHERE id = ?").run(req.params.id);
-  await Promise.allSettled([
-    fs.unlink(order.png_path),
-    fs.unlink(order.pdf_path)
-  ]);
+  db.prepare("UPDATE orders SET deleted_at = ? WHERE id = ?").run(new Date().toISOString(), req.params.id);
   res.json({ ok: true, order: toPublicOrder(order) });
+});
+
+app.patch("/api/orders/:id/restore", requireStaff, async (req, res) => {
+  const order = getOrderById(req.params.id, { includeDeleted: true });
+  if (!order) {
+    return res.status(404).json({ message: "Order not found" });
+  }
+  db.prepare("UPDATE orders SET deleted_at = NULL WHERE id = ?").run(req.params.id);
+  res.json(toPublicOrder(getOrderById(req.params.id)));
 });
 
 app.get("/api/printers", requireStaff, async (_req, res) => {
@@ -999,7 +1154,7 @@ app.post("/api/printers/test", requireStaff, async (_req, res) => {
 });
 
 app.post("/api/orders/:id/print", requireStaff, async (req, res) => {
-  const order = db.prepare("SELECT * FROM orders WHERE id = ?").get(req.params.id);
+  const order = getOrderById(req.params.id, { includeDeleted: true });
   if (!order) {
     return res.status(404).json({ message: "Order not found" });
   }
@@ -1014,7 +1169,7 @@ app.get("/api/orders/:id/download/:type", requireStaff, async (req, res) => {
   if (!["png", "pdf"].includes(type)) {
     return res.status(400).json({ message: "Unsupported download type" });
   }
-  const order = db.prepare("SELECT * FROM orders WHERE id = ?").get(req.params.id);
+  const order = getOrderById(req.params.id, { includeDeleted: true });
   if (!order) {
     return res.status(404).json({ message: "Order not found" });
   }
@@ -1032,7 +1187,7 @@ app.get("/api/orders/:id/file/:type", requireStaff, async (req, res) => {
   if (!["png", "pdf"].includes(type)) {
     return res.status(400).json({ message: "Unsupported file type" });
   }
-  const order = db.prepare("SELECT * FROM orders WHERE id = ?").get(req.params.id);
+  const order = getOrderById(req.params.id, { includeDeleted: true });
   if (!order) {
     return res.status(404).json({ message: "Order not found" });
   }
