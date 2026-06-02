@@ -1,12 +1,12 @@
 {
   "name": "luggage-tag-mvp",
-  "version": "1.4.16",
+  "version": "1.4.40",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "concurrently \"npm run server\" \"npm run client\"",
     "server": "node server/index.js",
-    "client": "vite --host 127.0.0.1",
+    "client": "vite --host 0.0.0.0",
     "client:lan": "vite --host 0.0.0.0",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",

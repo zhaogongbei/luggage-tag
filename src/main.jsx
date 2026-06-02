@@ -2,20 +2,36 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   CheckCircle2,
+  ChevronDown,
+  ClipboardList,
   Download,
+  FileClock,
   Home,
   LogIn,
   LogOut,
   MoreHorizontal,
   Printer,
   RefreshCw,
+  Search,
   Settings,
-  Trash2
+  Trash2,
+  Users,
+  X
 } from "lucide-react";
 import "./styles.css";
 
 const API_BASE = import.meta.env.DEV ? `${window.location.protocol}//${window.location.hostname}:3001` : "";
-const APP_VERSION = "V1.4.16";
+const APP_VERSION = "V1.4.40";
+const BRAND_LOGO_SRC = `${API_BASE}/brand-logo?v=${encodeURIComponent(APP_VERSION)}`;
+const roleLabels = {
+  super_admin: "Super Admin",
+  admin: "Admin",
+  client: "Client"
+};
+const statusLabels = {
+  active: "Active",
+  disabled: "Disabled"
+};
 const deploymentModes = [
   { value: "private", label: "Private", description: "仅员工登录后可使用定制页和后台" },
   { value: "invite", label: "Invite", description: "邀请码可访问定制页，后台仍需员工登录" },
@@ -93,6 +109,10 @@ function apiFetch(path, options = {}) {
       ...(options.headers ?? {})
     }
   });
+}
+
+function BrandLogo({ className = "" }) {
+  return <img alt="China Southern Airlines" className={`brand-logo-img ${className}`.trim()} src={BRAND_LOGO_SRC} />;
 }
 
 const legacyTemplateNames = {
@@ -548,48 +568,35 @@ function CustomerPage({ settings, previewNumber, onCreated, autoPrint = false, a
     }, 120);
   }
 
-  async function submitOrder() {
+  async function printOrder() {
     if (!isValidCustomerName(finalName)) {
       setMessage("请输入 1-12 位英文大写字母，可包含空格");
       setMessageType("error");
+      inputRef.current?.focus();
       return;
     }
-    const printWindow = autoPrint ? window.open("about:blank", "_blank") : null;
     setBusy(true);
     setMessage("");
     try {
       const pngDataUrl = canvasRef.current.toDataURL("image/png");
-      const response = await apiFetch("/api/orders", {
+      const response = await apiFetch("/api/orders/direct-print", {
         method: "POST",
         body: JSON.stringify({ templateId, customerText: finalName, pngDataUrl })
       });
       const data = await response.json();
       if (!response.ok) {
-        throw new Error(data.message || "生成失败");
+        throw new Error(data.message || "打印失败");
       }
-      setCustomerText("");
-      setMessage("生成成功");
+      setMessage(`✓ 打印成功\n编号：${data.orderNo}`);
       setMessageType("success");
       onCreated();
-      if (autoPrint && data.id) {
-        const params = new URLSearchParams({ autoReturn: autoReturn ? "1" : "0" });
-        const printUrl = `/ticket/${data.id}?${params.toString()}`;
-        if (printWindow) {
-          printWindow.location.href = printUrl;
-        } else {
-          window.open(printUrl, "_blank", "noopener,noreferrer");
-        }
-      }
-      if (autoReturn) {
-        window.setTimeout(() => {
-          setMessage("");
-          setTemplateId("template_01");
-        }, 2200);
-      }
+      window.setTimeout(() => {
+        setCustomerText("");
+        setTemplateId("template_01");
+        setMessage("");
+        inputRef.current?.focus();
+      }, 2000);
     } catch (error) {
-      if (printWindow && !printWindow.closed) {
-        printWindow.close();
-      }
       setMessage(error.message);
       setMessageType("error");
     } finally {
@@ -616,7 +623,7 @@ function CustomerPage({ settings, previewNumber, onCreated, autoPrint = false, a
         ref={actionPanelRef}
         onSubmit={(event) => {
           event.preventDefault();
-          submitOrder();
+          printOrder();
         }}
       >
         <fieldset className="creator-color-choice">
@@ -662,17 +669,17 @@ function CustomerPage({ settings, previewNumber, onCreated, autoPrint = false, a
           />
         </label>
         <button className="creator-submit-btn" disabled={busy} type="submit">
-          <CheckCircle2 size={42} />
-          {busy ? "生成中" : "提交生成"}
+          <Printer size={42} />
+          {busy ? "打印中" : "打印"}
         </button>
-        {message && <p className={`message ${messageType}`}>{message}</p>}
+        {message && <p className={`message ${messageType}`}>{message.split("\n").map((line) => <span key={line}>{line}</span>)}</p>}
       </form>
     </main>
   );
 }
 
 function AccessGate({ access, onAuthenticated }) {
-  const [loginForm, setLoginForm] = useState({ username: "admin", password: "" });
+  const [loginForm, setLoginForm] = useState({ username: "", password: "" });
   const [inviteCode, setInviteCode] = useState("");
   const [message, setMessage] = useState("");
   const isMaintenance = access?.deploymentMode === "maintenance";
@@ -780,7 +787,7 @@ function StaffOnlyPage({ children }) {
   return children;
 }
 
-function AdminPage({ settings, onSettingsSaved }) {
+function AdminPage({ settings, onSettingsSaved, access, onGoCustomer, onLogout }) {
   const [orders, setOrders] = useState([]);
   const [form, setForm] = useState(settings);
   const [eventForm, setEventForm] = useState(createEventFormFromSettings(settings));
@@ -792,6 +799,59 @@ function AdminPage({ settings, onSettingsSaved }) {
   const [showDeletedOrders, setShowDeletedOrders] = useState(false);
   const [showAdvancedLayout, setShowAdvancedLayout] = useState(false);
   const [openOrderMenuId, setOpenOrderMenuId] = useState(null);
+  const initialAdminTab = window.location.pathname === "/admin/dashboard" || window.location.pathname === "/admin"
+    ? "dashboard"
+    : window.location.pathname === "/admin/users"
+    ? "users"
+    : window.location.pathname === "/admin/settings"
+      ? "settings"
+      : window.location.pathname === "/admin/print-layout"
+        ? "layout"
+        : window.location.pathname === "/admin/logs"
+          ? "logs"
+          : window.location.pathname === "/admin/orders"
+            ? "orders"
+            : "orders";
+  const [adminTab, setAdminTab] = useState(initialAdminTab);
+  const [users, setUsers] = useState([]);
+  const [logs, setLogs] = useState([]);
+  const [userForm, setUserForm] = useState({ username: "", password: "", role: "client", status: "active" });
+  const [editingUserId, setEditingUserId] = useState(null);
+  const [userMessage, setUserMessage] = useState("");
+  const [userDrawerOpen, setUserDrawerOpen] = useState(false);
+  const [openUserMenu, setOpenUserMenu] = useState(false);
+  const [openUserActionMenuId, setOpenUserActionMenuId] = useState(null);
+  const [orderSearch, setOrderSearch] = useState("");
+  const [orderStatusFilter, setOrderStatusFilter] = useState("all");
+  const [orderTemplateFilter, setOrderTemplateFilter] = useState("all");
+  const isSuperAdmin = access?.role === "super_admin";
+  const canUseAdminTools = ["super_admin", "admin"].includes(access?.role);
+  const orderStats = {
+    total: orders.filter((order) => !order.deleted_at).length,
+    printed: orders.filter((order) => !order.deleted_at && order.print_status === "printed").length,
+    pending: orders.filter((order) => !order.deleted_at && order.print_status !== "printed").length,
+    deleted: orders.filter((order) => order.deleted_at).length
+  };
+  const todayOrderCount = orders.filter((order) => (
+    !order.deleted_at && new Date(order.generated_at).toDateString() === new Date().toDateString()
+  )).length;
+  const filteredOrders = orders.filter((order) => {
+    const keyword = orderSearch.trim().toUpperCase();
+    const matchesKeyword = !keyword ||
+      String(order.order_no).toUpperCase().includes(keyword) ||
+      String(order.customer_text).toUpperCase().includes(keyword);
+    const matchesStatus = orderStatusFilter === "all" || order.print_status === orderStatusFilter;
+    const matchesTemplate = orderTemplateFilter === "all" || order.template_id === orderTemplateFilter;
+    return matchesKeyword && matchesStatus && matchesTemplate;
+  });
+  const adminNavItems = [
+    { tab: "dashboard", label: "控制台", icon: Home, visible: true },
+    { tab: "orders", label: "订单管理", icon: ClipboardList, visible: true },
+    { tab: "layout", label: "拼版打印", icon: Printer, visible: true },
+    { tab: "users", label: "账号权限", icon: Users, visible: isSuperAdmin },
+    { tab: "settings", label: "系统设置", icon: Settings, visible: isSuperAdmin },
+    { tab: "logs", label: "操作日志", icon: FileClock, visible: isSuperAdmin }
+  ].filter((item) => item.visible);
 
   useEffect(() => {
     setForm(settings);
@@ -801,6 +861,10 @@ function AdminPage({ settings, onSettingsSaved }) {
   async function loadOrders() {
     const response = await apiFetch(`/api/orders${showDeletedOrders ? "?deleted=true" : ""}`);
     const nextOrders = await response.json();
+    if (!response.ok) {
+      setPrinterMessage(nextOrders.message || "订单加载失败");
+      return;
+    }
     setOrders(nextOrders);
     setSelectedOrderIds((ids) => ids.filter((id) => nextOrders.some((order) => order.id === id)));
   }
@@ -815,9 +879,37 @@ function AdminPage({ settings, onSettingsSaved }) {
     });
   }
 
+  async function loadUsers() {
+    if (!isSuperAdmin) {
+      return;
+    }
+    const response = await apiFetch("/api/users");
+    const data = await response.json();
+    if (!response.ok) {
+      setUserMessage(data.message || "账号列表加载失败");
+      return;
+    }
+    setUsers(data);
+  }
+
+  async function loadLogs() {
+    if (!isSuperAdmin) {
+      return;
+    }
+    const response = await apiFetch("/api/audit-logs");
+    const data = await response.json();
+    if (!response.ok) {
+      setUserMessage(data.message || "操作日志加载失败");
+      return;
+    }
+    setLogs(data);
+  }
+
   useEffect(() => {
     loadOrders();
-    loadPrinters();
+    if (canUseAdminTools) {
+      loadPrinters();
+    }
   }, []);
 
   useEffect(() => {
@@ -825,6 +917,9 @@ function AdminPage({ settings, onSettingsSaved }) {
   }, [showDeletedOrders]);
 
   useEffect(() => {
+    if (!canUseAdminTools) {
+      return;
+    }
     async function loadLayoutPreview() {
       try {
         const response = await apiFetch("/api/layout/preview", {
@@ -838,9 +933,48 @@ function AdminPage({ settings, onSettingsSaved }) {
       }
     }
     loadLayoutPreview();
-  }, [layoutOptions]);
+  }, [layoutOptions, canUseAdminTools]);
+
+  useEffect(() => {
+    if (adminTab === "users") {
+      loadUsers();
+    }
+    if (adminTab === "logs") {
+      loadLogs();
+    }
+  }, [adminTab, isSuperAdmin]);
+
+  useEffect(() => {
+    if (!isSuperAdmin && ["settings", "users", "logs"].includes(adminTab)) {
+      openAdminTab("orders");
+    }
+  }, [adminTab, isSuperAdmin]);
+
+  useEffect(() => {
+    function closeMenus(event) {
+      if (event.type === "keydown" && event.key !== "Escape") {
+        return;
+      }
+      if (event.type === "mousedown" && event.target.closest(".more-menu, .admin-user-menu")) {
+        return;
+      }
+      setOpenOrderMenuId(null);
+      setOpenUserActionMenuId(null);
+      setOpenUserMenu(false);
+    }
+    document.addEventListener("mousedown", closeMenus);
+    document.addEventListener("keydown", closeMenus);
+    return () => {
+      document.removeEventListener("mousedown", closeMenus);
+      document.removeEventListener("keydown", closeMenus);
+    };
+  }, []);
 
   async function saveSettings() {
+    if (!isSuperAdmin) {
+      setPrinterMessage("只有 Super Admin 可以修改系统设置");
+      return;
+    }
     if (
       Number(form.currentNumber) < Number(settings.currentNumber) &&
       !window.confirm(`当前编号将从 ${settings.currentNumber} 调低到 ${form.currentNumber}，可能造成编号重复。确认继续？`)
@@ -855,6 +989,10 @@ function AdminPage({ settings, onSettingsSaved }) {
   }
 
   async function resetEvent() {
+    if (!isSuperAdmin) {
+      setPrinterMessage("只有 Super Admin 可以重置活动编号");
+      return;
+    }
     if (!window.confirm("确认开启新活动并重置编号？历史订单编号不会改变。")) {
       return;
     }
@@ -907,8 +1045,15 @@ function AdminPage({ settings, onSettingsSaved }) {
     loadOrders();
   }
 
-  function openPrintPreview(order) {
-    window.open(`/print/${order.id}`, "_blank", "noopener,noreferrer");
+  async function printOrderDirect(order) {
+    setPrinterMessage("");
+    const response = await apiFetch(`/api/orders/${order.id}/print`, { method: "POST" });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      setPrinterMessage(data.message || "打印失败，请检查打印机");
+      return;
+    }
+    setPrinterMessage(data.message || `订单 ${order.order_no} 已发送到打印机`);
   }
 
   function toggleOrderSelection(orderId) {
@@ -1001,9 +1146,225 @@ function AdminPage({ settings, onSettingsSaved }) {
     setPrinterMessage(data.message || (response.ok ? "测试打印已发送" : "测试打印暂不可用"));
   }
 
+  function openAdminTab(tab) {
+    setAdminTab(tab);
+    const pathMap = {
+      dashboard: "/admin/dashboard",
+      orders: "/admin/orders",
+      settings: "/admin/settings",
+      users: "/admin/users",
+      layout: "/admin/print-layout",
+      logs: "/admin/logs"
+    };
+    window.history.replaceState(null, "", pathMap[tab] ?? "/admin/dashboard");
+  }
+
+  function editUser(user) {
+    setEditingUserId(user.id);
+    setUserForm({ username: user.username, password: "", role: user.role, status: user.status });
+    setUserMessage("");
+    setUserDrawerOpen(true);
+    setOpenUserActionMenuId(null);
+  }
+
+  function resetUserForm() {
+    setEditingUserId(null);
+    setUserForm({ username: "", password: "", role: "client", status: "active" });
+    setUserMessage("");
+  }
+
+  function openCreateUserDrawer() {
+    resetUserForm();
+    setUserDrawerOpen(true);
+  }
+
+  async function saveUser() {
+    setUserMessage("");
+    const response = await apiFetch(editingUserId ? `/api/users/${editingUserId}` : "/api/users", {
+      method: editingUserId ? "PATCH" : "POST",
+      body: JSON.stringify(userForm)
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      setUserMessage(data.message || "账号保存失败");
+      return;
+    }
+    setUserMessage(editingUserId ? "账号已更新" : "账号已创建");
+    resetUserForm();
+    setUserDrawerOpen(false);
+    loadUsers();
+  }
+
+  async function disableUser(user) {
+    const nextStatus = user.status === "active" ? "disabled" : "active";
+    const response = await apiFetch(`/api/users/${user.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ username: user.username, role: user.role, status: nextStatus })
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      setUserMessage(data.message || "状态修改失败");
+      return;
+    }
+    setUserMessage(`账号已${nextStatus === "active" ? "启用" : "禁用"}`);
+    loadUsers();
+  }
+
+  async function resetPassword(user) {
+    const password = window.prompt(`请输入 ${user.username} 的新密码（至少 6 位）`);
+    if (!password) {
+      return;
+    }
+    const response = await apiFetch(`/api/users/${user.id}/reset-password`, {
+      method: "POST",
+      body: JSON.stringify({ password })
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      setUserMessage(data.message || "密码重置失败");
+      return;
+    }
+    setUserMessage("密码已重置，该账号需重新登录");
+  }
+
+  async function deleteUser(user) {
+    if (!window.confirm(`确认删除账号 ${user.username}？该操作不会删除历史订单。`)) {
+      return;
+    }
+    const response = await apiFetch(`/api/users/${user.id}`, { method: "DELETE" });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      setUserMessage(data.message || "账号删除失败");
+      return;
+    }
+    setUserMessage("账号已删除");
+    loadUsers();
+  }
+
   return (
-    <main className="admin-layout">
-      <section className="panel settings-panel">
+    <main className="admin-console">
+      <header className="admin-header">
+        <div className="admin-brand">
+          <BrandLogo className="admin-logo" />
+        </div>
+        <nav className="admin-top-nav">
+          {adminNavItems.map((item) => {
+            const Icon = item.icon;
+            return (
+              <button
+                className={adminTab === item.tab ? "active" : ""}
+                key={item.tab}
+                onClick={() => openAdminTab(item.tab)}
+                type="button"
+              >
+                <Icon size={16} />
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
+        </nav>
+        <label className="admin-search">
+          <Search size={16} />
+          <input
+            placeholder="搜索订单编号 / 姓名..."
+            value={orderSearch}
+            onChange={(event) => {
+              setOrderSearch(event.target.value);
+              if (adminTab !== "orders") {
+                openAdminTab("orders");
+              }
+            }}
+          />
+        </label>
+        <div className="admin-header-actions">
+          <div className="admin-user-menu">
+            <button className="admin-user-chip" onClick={() => setOpenUserMenu((value) => !value)} type="button">
+              <span>{String(access?.user?.username ?? "A").slice(0, 1).toUpperCase()}</span>
+              <div>
+                <strong>{access?.user?.username}</strong>
+                <small>{roleLabels[access?.role] ?? "Staff"}</small>
+              </div>
+              <ChevronDown size={15} />
+            </button>
+            {openUserMenu && (
+              <div className="admin-user-popover">
+                <button onClick={onLogout} type="button">退出登录</button>
+              </div>
+            )}
+          </div>
+        </div>
+      </header>
+
+      <aside className="admin-sidebar">
+        <div className="admin-sidebar-brand">
+          <BrandLogo className="admin-logo" />
+        </div>
+        <nav className="admin-sidebar-nav">
+          {adminNavItems.map((item) => {
+            const Icon = item.icon;
+            return (
+              <button
+                className={adminTab === item.tab ? "active" : ""}
+                key={item.tab}
+                onClick={() => openAdminTab(item.tab)}
+                type="button"
+              >
+                <Icon size={18} />
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
+        </nav>
+        <div className="admin-sidebar-footer">
+          <button onClick={onGoCustomer} type="button">
+            <Home size={18} />
+            <span>返回定制页</span>
+          </button>
+          <button onClick={onLogout} type="button">
+            <LogOut size={18} />
+            <span>退出登录</span>
+          </button>
+        </div>
+      </aside>
+
+      <section className="admin-main">
+        <div className="admin-page-card">
+      {adminTab === "dashboard" && <section className="dashboard-panel">
+        <div className="dashboard-hero">
+          <div>
+            <span>Overview</span>
+            <h2>控制台</h2>
+            <p>查看今日订单、打印状态和系统运行概览。</p>
+          </div>
+          <button className="secondary-btn inline" onClick={() => openAdminTab("orders")} type="button">
+            查看订单
+          </button>
+        </div>
+        <div className="metric-grid">
+          <article className="metric-card">
+            <span>今日订单</span>
+            <strong>{todayOrderCount}</strong>
+            <small>当天生成订单数量</small>
+          </article>
+          <article className="metric-card">
+            <span>总订单</span>
+            <strong>{orderStats.total}</strong>
+            <small>不含回收站订单</small>
+          </article>
+          <article className="metric-card">
+            <span>待打印</span>
+            <strong>{orderStats.pending}</strong>
+            <small>需要处理的订单</small>
+          </article>
+          <article className="metric-card">
+            <span>已打印</span>
+            <strong>{orderStats.printed}</strong>
+            <small>已完成打印订单</small>
+          </article>
+        </div>
+      </section>}
+
+      {adminTab === "settings" && isSuperAdmin && <section className="panel settings-panel">
         <div className="section-title">
           <Settings size={20} />
           <span>编号设置</span>
@@ -1056,14 +1417,18 @@ function AdminPage({ settings, onSettingsSaved }) {
             />
             <span>/creator 自动返回</span>
           </label>
+          <label className="field">
+            <span>系统版本</span>
+            <input readOnly value={APP_VERSION} />
+          </label>
         </div>
         <button className="secondary-btn" onClick={saveSettings} type="button">
           <CheckCircle2 size={18} />
           保存设置
         </button>
-      </section>
+      </section>}
 
-      <section className="panel event-reset-panel">
+      {adminTab === "settings" && isSuperAdmin && <section className="panel event-reset-panel">
         <div className="section-title">
           <RefreshCw size={20} />
           <span>新活动重置编号</span>
@@ -1112,9 +1477,9 @@ function AdminPage({ settings, onSettingsSaved }) {
           <RefreshCw size={18} />
           重置为新活动
         </button>
-      </section>
+      </section>}
 
-      <section className="panel access-settings-panel">
+      {adminTab === "settings" && isSuperAdmin && <section className="panel access-settings-panel">
         <div className="section-title">
           <LogIn size={20} />
           <span>访问模式</span>
@@ -1148,9 +1513,9 @@ function AdminPage({ settings, onSettingsSaved }) {
           <CheckCircle2 size={18} />
           保存访问模式
         </button>
-      </section>
+      </section>}
 
-      <section className="panel printer-panel">
+      {(adminTab === "settings" || adminTab === "layout") && <section className="panel printer-panel">
         <div className="section-title">
           <Printer size={20} />
           <span>打印设置</span>
@@ -1161,15 +1526,16 @@ function AdminPage({ settings, onSettingsSaved }) {
             <input readOnly value={printerState.defaultPrinter || "未读取到默认打印机"} />
           </label>
           <label className="field">
-            <span>选择打印机（V2 预留）</span>
+            <span>后台配置打印机名称</span>
             <select
               value={printerState.selectedPrinter}
+              disabled={!isSuperAdmin}
               onChange={(event) => saveSelectedPrinter(event.target.value)}
             >
-              <option value="">使用浏览器打印对话框</option>
+              <option value="">使用本机默认打印机</option>
               {printerState.printers.map((printer) => (
                 <option key={printer.name} value={printer.name}>
-                  {printer.name}{printer.isDefault ? "（默认）" : ""}
+                  {printer.name}{printer.isDefault ? "（默认）" : ""}{printer.isVirtual ? "（虚拟/不出纸）" : ""}
                 </option>
               ))}
             </select>
@@ -1184,9 +1550,9 @@ function AdminPage({ settings, onSettingsSaved }) {
           </button>
         </div>
         {printerMessage && <p className="message neutral">{printerMessage}</p>}
-      </section>
+      </section>}
 
-      <section className="panel layout-panel">
+      {adminTab === "layout" && <section className="panel layout-panel">
         <div className="section-title split">
           <span>智能拼版设置</span>
           <strong className="layout-summary">
@@ -1266,9 +1632,150 @@ function AdminPage({ settings, onSettingsSaved }) {
             <span>下方显示编号</span>
           </label>}
         </div>
-      </section>
+      </section>}
 
-      <section className="panel orders-panel">
+      {adminTab === "users" && isSuperAdmin && <section className="panel users-panel">
+        <div className="section-title split">
+          <span>账号权限</span>
+          <button className="secondary-btn inline" onClick={openCreateUserDrawer} type="button">+ 新建账号</button>
+        </div>
+        {userMessage && <p className="message neutral">{userMessage}</p>}
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>账号</th>
+                <th>角色</th>
+                <th>状态</th>
+                <th>最后登录</th>
+                <th>创建时间</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {users.map((user) => (
+                <tr key={user.id}>
+                  <td>{user.id}</td>
+                  <td>{user.username}</td>
+                  <td><span className={`role-tag ${user.role}`}>{roleLabels[user.role] ?? user.role}</span></td>
+                  <td><span className={`status ${user.status}`}>{statusLabels[user.status] ?? user.status}</span></td>
+                  <td>{user.last_login_at ? formatDateTime(user.last_login_at) : "-"}</td>
+                  <td>{formatDateTime(user.created_at)}</td>
+                  <td className="actions">
+                    <div className="more-menu">
+                      <button className="icon-btn" onClick={() => setOpenUserActionMenuId(openUserActionMenuId === user.id ? null : user.id)} title="更多操作" type="button">
+                        <MoreHorizontal size={17} />
+                      </button>
+                      {openUserActionMenuId === user.id && (
+                        <div className="more-menu-popover">
+                          <button onClick={() => editUser(user)} type="button">编辑</button>
+                          <button onClick={() => resetPassword(user)} type="button">重置密码</button>
+                          <button onClick={() => disableUser(user)} type="button">{user.status === "active" ? "禁用" : "启用"}</button>
+                          <button onClick={() => deleteUser(user)} type="button">删除</button>
+                        </div>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {!users.length && <tr><td colSpan="7" className="empty">暂无账号</td></tr>}
+            </tbody>
+          </table>
+        </div>
+        {userDrawerOpen && (
+          <div className="admin-drawer-backdrop" onClick={() => setUserDrawerOpen(false)}>
+            <aside className="admin-drawer" onClick={(event) => event.stopPropagation()}>
+              <div className="admin-drawer-header">
+                <div>
+                  <span>Account</span>
+                  <h3>{editingUserId ? "编辑账号" : "新建账号"}</h3>
+                </div>
+                <button className="icon-btn" onClick={() => setUserDrawerOpen(false)} type="button">
+                  <X size={18} />
+                </button>
+              </div>
+              <div className="admin-drawer-body">
+                <label className="field">
+                  <span>用户名</span>
+                  <input value={userForm.username} onChange={(event) => setUserForm({ ...userForm, username: event.target.value })} />
+                </label>
+                <label className="field">
+                  <span>{editingUserId ? "密码由重置按钮修改" : "密码"}</span>
+                  <input
+                    disabled={Boolean(editingUserId)}
+                    type="password"
+                    value={userForm.password}
+                    onChange={(event) => setUserForm({ ...userForm, password: event.target.value })}
+                  />
+                </label>
+                <label className="field">
+                  <span>角色</span>
+                  <select
+                    disabled={userForm.username === "gongbei"}
+                    value={userForm.role}
+                    onChange={(event) => setUserForm({ ...userForm, role: event.target.value })}
+                  >
+                    {(userForm.username === "gongbei" || userForm.role === "super_admin") && <option value="super_admin">Super Admin</option>}
+                    <option value="admin">Admin</option>
+                    <option value="client">Client</option>
+                  </select>
+                </label>
+                <label className="field">
+                  <span>状态</span>
+                  <select value={userForm.status} onChange={(event) => setUserForm({ ...userForm, status: event.target.value })}>
+                    <option value="active">Active</option>
+                    <option value="disabled">Disabled</option>
+                  </select>
+                </label>
+              </div>
+              <div className="admin-drawer-footer">
+                <button className="secondary-btn inline" onClick={() => setUserDrawerOpen(false)} type="button">取消</button>
+                <button className="primary-btn compact" onClick={saveUser} type="button">
+                  <CheckCircle2 size={18} />
+                  {editingUserId ? "保存账号" : "创建账号"}
+                </button>
+              </div>
+            </aside>
+          </div>
+        )}
+      </section>}
+
+      {adminTab === "logs" && isSuperAdmin && <section className="panel logs-panel">
+        <div className="section-title split">
+          <span>操作日志</span>
+          <button className="icon-btn" onClick={loadLogs} title="刷新" type="button"><RefreshCw size={18} /></button>
+        </div>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>账号</th>
+                <th>角色</th>
+                <th>动作</th>
+                <th>对象</th>
+                <th>IP</th>
+              </tr>
+            </thead>
+            <tbody>
+              {logs.map((log) => (
+                <tr key={log.id}>
+                  <td>{formatDateTime(log.created_at)}</td>
+                  <td>{log.username || "-"}</td>
+                  <td>{roleLabels[log.role] ?? log.role}</td>
+                  <td>{log.action}</td>
+                  <td>{log.target_type}{log.target_id ? ` #${log.target_id}` : ""}</td>
+                  <td>{log.ip}</td>
+                </tr>
+              ))}
+              {!logs.length && <tr><td colSpan="6" className="empty">暂无日志</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </section>}
+
+      {adminTab === "orders" && <section className="panel orders-panel">
         <div className="section-title split">
           <span>{showDeletedOrders ? "订单回收站" : "订单列表"}</span>
           <div className="order-toolbar">
@@ -1293,6 +1800,33 @@ function AdminPage({ settings, onSettingsSaved }) {
               <RefreshCw size={18} />
             </button>
           </div>
+        </div>
+        <div className="order-filter-bar">
+          <label>
+            <span>搜索</span>
+            <input
+              placeholder="姓名 / 编号"
+              value={orderSearch}
+              onChange={(event) => setOrderSearch(event.target.value)}
+            />
+          </label>
+          <label>
+            <span>模板</span>
+            <select value={orderTemplateFilter} onChange={(event) => setOrderTemplateFilter(event.target.value)}>
+              <option value="all">全部模板</option>
+              {templates.map((template) => (
+                <option key={template.id} value={template.id}>{template.displayName}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>状态</span>
+            <select value={orderStatusFilter} onChange={(event) => setOrderStatusFilter(event.target.value)}>
+              <option value="all">全部状态</option>
+              <option value="pending">待打印</option>
+              <option value="printed">已打印</option>
+            </select>
+          </label>
         </div>
         <div className="table-wrap">
           <table>
@@ -1321,7 +1855,7 @@ function AdminPage({ settings, onSettingsSaved }) {
               </tr>
             </thead>
             <tbody>
-              {orders.map((order) => (
+              {filteredOrders.map((order) => (
                 <tr key={order.id}>
                   <td>
                     {!showDeletedOrders && (
@@ -1349,7 +1883,7 @@ function AdminPage({ settings, onSettingsSaved }) {
                       </button>
                     ) : (
                       <>
-                        <button onClick={() => openPrintPreview(order)} title="打开浏览器打印预览" type="button">
+                        <button onClick={() => printOrderDirect(order)} title="发送到默认或已配置打印机" type="button">
                           <Printer size={17} />
                           打印
                         </button>
@@ -1382,7 +1916,7 @@ function AdminPage({ settings, onSettingsSaved }) {
                   </td>
                 </tr>
               ))}
-              {!orders.length && (
+              {!filteredOrders.length && (
                 <tr>
                   <td colSpan="8" className="empty">
                     暂无订单
@@ -1392,18 +1926,22 @@ function AdminPage({ settings, onSettingsSaved }) {
             </tbody>
           </table>
         </div>
+      </section>}
+        </div>
       </section>
     </main>
   );
 }
 
 function App() {
-  const printMatch = window.location.pathname.match(/^\/print\/(\d+)$/);
+  const pathname = window.location.pathname;
+  const printMatch = pathname.match(/^\/print\/(\d+)$/);
   const ticketMatch = window.location.pathname.match(/^\/ticket\/(\d+)$/);
-  const impositionPrintMatch = window.location.pathname === "/print-layout" || window.location.pathname === "/print-a4";
-  const creatorMode = window.location.pathname === "/creator";
+  const impositionPrintMatch = pathname === "/print-layout" || pathname === "/print-a4";
+  const creatorMode = pathname === "/creator";
+  const adminMode = pathname.startsWith("/admin");
   const creatorParams = new URLSearchParams(window.location.search);
-  const [page, setPage] = useState("customer");
+  const [page, setPage] = useState(adminMode ? "admin" : "customer");
   const [access, setAccess] = useState(null);
   const [settings, setSettings] = useState({
     prefix: "No.",
@@ -1516,7 +2054,7 @@ function App() {
   const customerDisabled = !access?.customerAccess;
   const activePage = customerDisabled && page === "customer" ? "admin" : page;
   const showStaffNavigation = Boolean(access?.authenticated);
-  const showLogout = Boolean(access?.authenticated || access?.invited);
+  const showLogout = Boolean(access?.sessionAuthenticated || access?.authenticated || access?.invited);
   const autoPrint = creatorParams.has("autoPrint")
     ? parseBooleanParam(creatorParams.get("autoPrint"))
     : Boolean(settings.creatorAutoPrint) || parseBooleanParam(import.meta.env.VITE_CREATOR_AUTO_PRINT);
@@ -1529,11 +2067,7 @@ function App() {
       <div className="app-shell creator-shell">
         <header className="creator-topbar">
           <div className="creator-brand">
-            <span className="brand-mark">K</span>
-            <div>
-              <h1>DIY 行李牌自助定制</h1>
-              <p>{APP_VERSION}</p>
-            </div>
+            <BrandLogo className="brand-mark" />
           </div>
           {showLogout && (
             <button className="creator-logout" onClick={logout} type="button">
@@ -1555,10 +2089,44 @@ function App() {
   }
 
   if (activePage === "admin" && !access?.authenticated) {
+    if (access?.customerAccess) {
+      return (
+        <div className="app-shell creator-shell">
+          <header className="creator-topbar">
+            <div className="creator-brand">
+              <BrandLogo className="brand-mark" />
+            </div>
+            <button className="creator-logout" onClick={logout} type="button">
+              <LogOut size={24} />
+              退出
+            </button>
+          </header>
+          <CustomerPage
+            autoPrint={autoPrint}
+            autoReturn={autoReturn}
+            onCreated={loadState}
+            previewNumber={previewNumber}
+            settings={settings}
+          />
+        </div>
+      );
+    }
     return <AccessGate access={access} onAuthenticated={(nextAccess) => {
       setAccess(nextAccess);
       loadAccessAndState();
     }} />;
+  }
+
+  if (activePage === "admin") {
+    return (
+      <AdminPage
+        access={access}
+        onGoCustomer={() => setPage("customer")}
+        onLogout={logout}
+        onSettingsSaved={handleSettingsSaved}
+        settings={settings}
+      />
+    );
   }
 
   const customerKiosk = activePage === "customer";
@@ -1567,11 +2135,7 @@ function App() {
     <div className={`app-shell ${customerKiosk ? "creator-shell" : ""}`}>
       <header className={customerKiosk ? "creator-topbar" : "topbar"}>
         <div className={customerKiosk ? "creator-brand" : "brand"}>
-          <span className="brand-mark">K</span>
-          <div>
-            <h1>DIY 行李牌现场定制</h1>
-            <p>{customerKiosk ? APP_VERSION : `客户定制 / 订单后台 / 文件导出 / ${APP_VERSION}`}</p>
-          </div>
+          <BrandLogo className="brand-mark" />
         </div>
         <nav>
           {!customerKiosk && (
@@ -1600,15 +2164,11 @@ function App() {
         </nav>
       </header>
       {loadError && <p className="message app-message">{loadError}</p>}
-      {activePage === "customer" ? (
-        <CustomerPage
-          onCreated={loadState}
-          previewNumber={previewNumber}
-          settings={settings}
-        />
-      ) : (
-        <AdminPage onSettingsSaved={handleSettingsSaved} settings={settings} />
-      )}
+      <CustomerPage
+        onCreated={loadState}
+        previewNumber={previewNumber}
+        settings={settings}
+      />
     </div>
   );
 }
