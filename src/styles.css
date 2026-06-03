@@ -1044,6 +1044,25 @@ input[type="checkbox"] {
   font-weight: 700;
 }
 
+.order-pagination {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  padding: 14px 16px;
+}
+
+.order-pagination-info {
+  color: var(--console-muted);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.order-pagination button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .printer-grid {
   align-items: end;
   display: grid;

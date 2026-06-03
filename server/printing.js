@@ -10,6 +10,24 @@ import { formatTicketDateTime, createTicketPdf } from "./pdf.js";
 
 const execFileAsync = promisify(execFile);
 
+const PRINTER_CACHE_TTL_MS = 30_000;
+let printerCache = { data: null, fetchedAt: 0 };
+
+async function getSystemPrintersFresh() {
+  if (process.platform === "win32") { return getWindowsPrinters(); }
+  return getCupsPrinters();
+}
+
+async function getSystemPrinters(options = {}) {
+  const forceRefresh = Boolean(options.refresh);
+  if (!forceRefresh && printerCache.data && Date.now() - printerCache.fetchedAt < PRINTER_CACHE_TTL_MS) {
+    return printerCache.data;
+  }
+  const printers = await getSystemPrintersFresh();
+  printerCache = { data: printers, fetchedAt: Date.now() };
+  return printers;
+}
+
 function isVirtualPrinterName(name) {
   return /\b(pdf|xps|onenote|fax)\b|wps|\u5BFC\u51FA\u4E3A/i.test(String(name ?? ""));
 }
@@ -32,11 +50,6 @@ async function getCupsPrinters() {
     return printerOutput.split(/\r?\n/).map((line) => line.match(/^printer\s+(\S+)/)?.[1]).filter(Boolean)
       .map((name) => ({ name, isDefault: name === defaultPrinter, isVirtual: isVirtualPrinterName(name) }));
   } catch { return []; }
-}
-
-async function getSystemPrinters() {
-  if (process.platform === "win32") { return getWindowsPrinters(); }
-  return getCupsPrinters();
 }
 
 async function resolvePrinterName(requestedPrinterName = "") {

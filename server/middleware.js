@@ -1,4 +1,4 @@
-import { getSessionUser, getRequestUser, hasRole, isInviteRequest } from "./auth.js";
+import { getSessionUser, getRequestUser, getRequestIp, hasRole, isInviteRequest } from "./auth.js";
 import { getSettings } from "./db.js";
 
 async function getAccessState(req) {
@@ -19,15 +19,6 @@ async function getAccessState(req) {
     customerAccess: settings.deploymentMode === "maintenance" ? false : customerAccess,
     deploymentMode: settings.deploymentMode
   };
-}
-
-async function requireStaff(req, res, next) {
-  const user = getRequestUser(req);
-  const access = await getAccessState(req);
-  if (!hasRole(user, ["super_admin", "admin"])) {
-    return res.status(401).json({ message: "Staff login required", access });
-  }
-  next();
 }
 
 function requireRole(roles) {
@@ -65,4 +56,48 @@ async function requireSettingsAccess(req, res, next) {
   next();
 }
 
-export { getAccessState, requireRole, requireCustomerAccess, requireSettingsAccess };
+const requestLimits = new Map();
+
+function getRateLimitKey(req, resource = "") {
+  const ip = getRequestIp(req);
+  const userId = getRequestUser(req)?.id ?? "";
+  return `${ip}:${userId}:${resource}`;
+}
+
+function checkRateLimit(key, maxRequests = 100, windowMs = 1000) {
+  const now = Date.now();
+  const entry = requestLimits.get(key);
+  if (!entry || now - entry.resetTime >= windowMs) {
+    requestLimits.set(key, { count: 1, resetTime: now });
+    return { allowed: true, remaining: maxRequests - 1 };
+  }
+  entry.count++;
+  if (entry.count > maxRequests) {
+    return { allowed: false, remaining: 0, retryAfter: Math.ceil((entry.resetTime + windowMs - now) / 1000) };
+  }
+  return { allowed: true, remaining: maxRequests - entry.count };
+}
+
+function rateLimitMiddleware(resource, maxRequests = 100, windowMs = 1000) {
+  return (req, res, next) => {
+    const key = getRateLimitKey(req, resource);
+    const limit = checkRateLimit(key, maxRequests, windowMs);
+    res.setHeader("X-RateLimit-Limit", maxRequests);
+    res.setHeader("X-RateLimit-Remaining", Math.max(0, limit.remaining));
+    if (!limit.allowed) {
+      res.setHeader("Retry-After", limit.retryAfter);
+      return res.status(429).json({ message: `\u8BF7\u6C42\u8FC7\u4E8E\u9891\u7E41\uFF0C\u8BF7${limit.retryAfter}\u79D2\u540E\u91CD\u8BD5` });
+    }
+    next();
+  };
+}
+
+function cleanupRateLimitMap() {
+  const now = Date.now();
+  for (const [key, entry] of requestLimits.entries()) {
+    if (now - entry.resetTime > 60_000) requestLimits.delete(key);
+  }
+}
+setInterval(cleanupRateLimitMap, 30_000).unref();
+
+export { getAccessState, requireRole, requireCustomerAccess, requireSettingsAccess, rateLimitMiddleware };

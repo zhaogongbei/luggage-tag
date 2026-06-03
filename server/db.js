@@ -6,13 +6,17 @@ import {
   dbPath, backupDir, exportDir,
   superAdminUsername, defaultAdminUsername, superAdminPassword,
   backupIntervalMs, backupRetention,
-  tokenCleanupIntervalMs, auditLogRetention,
+  tokenCleanupIntervalMs, auditLogRetention, auditCleanupIntervalMs,
   exportCleanupIntervalMs, exportCleanupMinAgeMs,
+  brandLogoCandidates,
   defaultSettings,
-  dataDir, normalizePathForCompare, toRelativeExportPath, resolveStoredFilePath
+  dataDir, normalizePathForCompare, toRelativeExportPath
 } from "./config.js";
 
 const db = new DatabaseSync(dbPath);
+db.exec("PRAGMA journal_mode = WAL;");
+db.exec("PRAGMA synchronous = NORMAL;");
+db.exec("PRAGMA busy_timeout = 5000;");
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS settings (
@@ -76,6 +80,10 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_orders_created_by ON orders(created_by);
   CREATE INDEX IF NOT EXISTS idx_orders_deleted_at ON orders(deleted_at);
   CREATE INDEX IF NOT EXISTS idx_auth_tokens_user_id ON auth_tokens(user_id);
+  CREATE INDEX IF NOT EXISTS idx_events_id ON events(id);
+  CREATE INDEX IF NOT EXISTS idx_users_id ON users(id);
+  CREATE INDEX IF NOT EXISTS idx_orders_deleted_print ON orders(deleted_at, print_status);
+  CREATE INDEX IF NOT EXISTS idx_orders_deleted_date ON orders(deleted_at, generated_at);
 `);
 
 for (const [key, value] of Object.entries(defaultSettings)) {
@@ -215,7 +223,8 @@ async function cleanupBackups() {
 async function backupDatabase() {
   try {
     const filename = `luggage-tag-${createTimestampForFilename()}.sqlite`;
-    await fs.copyFile(dbPath, path.join(backupDir, filename));
+    const dest = path.join(backupDir, filename).replace(/'/g, "''");
+    db.exec(`VACUUM INTO '${dest}'`);
     await cleanupBackups();
   } catch (e) { console.error("Failed to backup SQLite database", e); }
 }
@@ -226,9 +235,16 @@ function cleanupExpiredTokens() { db.prepare("DELETE FROM auth_tokens WHERE expi
 setInterval(cleanupExpiredTokens, tokenCleanupIntervalMs).unref();
 
 function cleanupAuditLogs() {
-  db.prepare("DELETE FROM audit_logs WHERE id NOT IN (SELECT id FROM audit_logs ORDER BY id DESC LIMIT ?)").run(auditLogRetention);
+  try {
+    const offset = db.prepare("SELECT id FROM audit_logs ORDER BY id DESC LIMIT 1 OFFSET ?").get(auditLogRetention);
+    if (offset) {
+      db.prepare("DELETE FROM audit_logs WHERE id < ?").run(offset.id);
+    }
+  } catch (e) {
+    console.error("Failed to cleanup audit logs", e);
+  }
 }
-setInterval(cleanupAuditLogs, tokenCleanupIntervalMs).unref();
+setInterval(cleanupAuditLogs, auditCleanupIntervalMs).unref();
 
 async function cleanupExportFiles() {
   try {
@@ -328,14 +344,8 @@ function toPublicOrder(order) {
   return { id: order.id, event_id: order.event_id, event_name: order.event_name ?? "", event_date: order.event_date ?? "", order_no: order.order_no, template_id: order.template_id, customer_text: order.customer_text, generated_at: order.generated_at, print_status: order.print_status, deleted_at: order.deleted_at ?? "", created_by: order.created_by ?? null, creator_username: order.creator_username ?? "" };
 }
 
-function writeAuditLogEntry(req, actor, action, targetType = "", targetId = "", detail = {}) {
-  const ip = String(req?.headers?.["x-forwarded-for"] ?? req?.socket?.remoteAddress ?? "unknown").split(",")[0].trim();
-  db.prepare(`INSERT INTO audit_logs (user_id, username, role, action, target_type, target_id, detail, ip, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(actor?.id ?? null, actor?.username ?? "", actor?.role ?? "", action, targetType, String(targetId ?? ""), JSON.stringify(detail ?? {}), ip, new Date().toISOString());
-}
-
 async function getBrandLogoPath() {
-  const { brandLogoCandidates: candidates } = await import("./config.js");
-  for (const lp of candidates) {
+  for (const lp of brandLogoCandidates) {
     try { await fs.access(lp); return lp; } catch { /* next */ }
   }
   return "";
@@ -347,5 +357,5 @@ export {
   getSettings, toClientSettings, getActiveEvent, toPublicEvent,
   formatEventOrderNo, syncLegacyNumberSettings, normalizeEventPayload,
   getOrderById, getOrdersByIds, parseOrderIds, toPublicOrder,
-  getBrandLogoPath, writeAuditLogEntry
+  getBrandLogoPath
 };

@@ -3,14 +3,20 @@
   "version": "1.4.40",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22.5.0"
+  },
   "scripts": {
-    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "dev": "node scripts/dev.mjs",
     "server": "node server/index.js",
     "client": "vite --host 0.0.0.0",
     "client:lan": "vite --host 0.0.0.0",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
-    "preview:lan": "vite preview --host 0.0.0.0"
+    "preview:lan": "vite preview --host 0.0.0.0",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write \"src/**/*.{js,jsx}\" \"server/**/*.js\""
   },
   "dependencies": {
     "@capacitor-community/electron": "^5.0.1",
@@ -27,5 +33,12 @@
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "vite": "^7.3.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.4.1",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "prettier": "^3.8.3"
   }
 }

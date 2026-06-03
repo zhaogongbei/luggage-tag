@@ -30,6 +30,7 @@ const backupRetention = Math.max(1, Number.parseInt(process.env.LUGGAGE_TAG_BACK
 const exportCleanupIntervalMs = Math.max(60_000, Number.parseInt(process.env.LUGGAGE_TAG_EXPORT_CLEANUP_INTERVAL_MS ?? "86400000", 10) || 86_400_000);
 const exportCleanupMinAgeMs = Math.max(60_000, Number.parseInt(process.env.LUGGAGE_TAG_EXPORT_CLEANUP_MIN_AGE_MS ?? "604800000", 10) || 604_800_000);
 const tokenCleanupIntervalMs = Math.max(60_000, Number.parseInt(process.env.LUGGAGE_TAG_TOKEN_CLEANUP_INTERVAL_MS ?? "3600000", 10) || 3_600_000);
+const auditCleanupIntervalMs = Math.max(60_000, Number.parseInt(process.env.LUGGAGE_TAG_AUDIT_CLEANUP_INTERVAL_MS ?? String(tokenCleanupIntervalMs), 10) || tokenCleanupIntervalMs);
 const auditLogRetention = Math.max(1000, Number.parseInt(process.env.LUGGAGE_TAG_AUDIT_RETENTION ?? "5000", 10) || 5000);
 const forceSecureCookie = process.env.LUGGAGE_TAG_COOKIE_SECURE === "true";
 const trustProxy = process.env.LUGGAGE_TAG_TRUST_PROXY === "true";
@@ -123,7 +124,7 @@ export {
   loginMaxFailures, loginLockMs,
   backupIntervalMs, backupRetention,
   exportCleanupIntervalMs, exportCleanupMinAgeMs,
-  tokenCleanupIntervalMs, auditLogRetention,
+  tokenCleanupIntervalMs, auditCleanupIntervalMs, auditLogRetention,
   forceSecureCookie, trustProxy, allowDefaultPasswordOnPublicHost,
   brandLogoCandidates, allowedOrigins,
   defaultSettings, deploymentModes, userRoles, userStatuses,

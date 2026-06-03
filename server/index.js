@@ -1,6 +1,5 @@
 import express from "express";
 import cors from "cors";
-import fs from "node:fs/promises";
 import path from "node:path";
 import crypto from "node:crypto";
 import helmet from "helmet";
@@ -22,7 +21,7 @@ import {
 
 import {
   getRequestIp, inviteFailures,
-  getLoginFailure, recordLoginFailure, clearLoginFailure,
+  getLoginFailure, recordLoginFailure, clearLoginFailure, getInviteFailure,
   parseCookies, createToken, deleteToken,
   setSessionCookie, setInviteCookie, clearAuthCookies,
   createOrderAccessToken, setOrderAccessCookie, hasOrderAccess,
@@ -35,7 +34,20 @@ import {
 import { createOrderFromPayload } from "./orders.js";
 import { createTicketPdfBuffer, createImpositionPdf, computeImpositionLayout } from "./pdf.js";
 import { getSystemPrinters, printTicketDirect, printOrderTicket } from "./printing.js";
-import { getAccessState, requireRole, requireCustomerAccess, requireSettingsAccess } from "./middleware.js";
+import { getAccessState, requireRole, requireCustomerAccess, requireSettingsAccess, rateLimitMiddleware } from "./middleware.js";
+
+function sendServerError(res, err, fallbackMsg, errorCode = "INTERNAL_ERROR") {
+  const statusCode = 500;
+  const timestamp = new Date().toISOString();
+  const requestId = crypto.randomBytes(8).toString("hex");
+  console.error(JSON.stringify({
+    timestamp, requestId, errorCode, statusCode,
+    message: err?.message || fallbackMsg,
+    stack: process.env.NODE_ENV === "development" ? err?.stack : undefined
+  }));
+  const message = process.env.NODE_ENV === "production" ? fallbackMsg : (err?.message || fallbackMsg);
+  res.status(statusCode).json({ errorCode, message, requestId });
+}
 
 function isAllowedOrigin(origin, req) {
   if (!origin) { return true; }
@@ -79,8 +91,25 @@ app.use(cors((req, callback) => {
   const allowOrigin = !origin || isAllowedOrigin(origin, req);
   callback(null, { credentials: true, origin: allowOrigin });
 }));
-app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
+app.use(helmet({
+  crossOriginEmbedderPolicy: false,
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      imgSrc: ["'self'", "data:", "blob:"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'"],
+      connectSrc: ["'self'", "*"], // 局域网多端访问；如可收敛请按部署域名收紧
+    }
+  }
+}));
 app.use(express.json({ limit: "12mb" }));
+
+// 全局速率限制
+app.use("/api/orders", rateLimitMiddleware("orders", 200, 60_000));
+app.use("/api/orders/imposition", rateLimitMiddleware("imposition", 20, 60_000));
+app.use("/api/orders/a4-layout", rateLimitMiddleware("a4layout", 20, 60_000));
+app.use("/api/layout/preview", rateLimitMiddleware("preview", 100, 60_000));
 
 if (process.env.NODE_ENV === "production") {
   app.use(express.static(path.join(rootDir, "dist")));
@@ -93,6 +122,16 @@ app.get("/brand-logo", async (_req, res) => {
   res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
   res.setHeader("Cache-Control", "no-store, max-age=0");
   res.sendFile(logoPath);
+});
+
+// ---- Health check ----
+app.get("/health", async (_req, res) => {
+  try {
+    db.prepare("SELECT 1").get();
+    res.json({ status: "ok", uptime: Math.floor(process.uptime()), timestamp: new Date().toISOString() });
+  } catch (error) {
+    res.status(503).json({ status: "unhealthy", error: error.message, uptime: Math.floor(process.uptime()) });
+  }
 });
 
 // ---- Auth routes ----
@@ -113,7 +152,7 @@ app.post("/api/auth/login", async (req, res) => {
       const retrySeconds = Math.ceil((nextFailure.lockedUntil - Date.now()) / 1000);
       return res.status(429).json({ message: `\u767B\u5F55\u5931\u8D25\u6B21\u6570\u8FC7\u591A\uFF0C\u8BF7 ${retrySeconds} \u79D2\u540E\u518D\u8BD5` });
     }
-    return res.status(401).json({ message: user?.status === "disabled" ? "\u8D26\u53F7\u5DF2\u7981\u7528" : "\u8D26\u53F7\u6216\u5BC6\u7801\u9519\u8BEF" });
+    return res.status(401).json({ message: "\u8D26\u53F7\u6216\u5BC6\u7801\u9519\u8BEF" });
   }
   clearLoginFailure(ip);
   db.prepare("UPDATE users SET last_login_at = ? WHERE id = ?").run(new Date().toISOString(), user.id);
@@ -133,7 +172,7 @@ app.post("/api/auth/login", async (req, res) => {
 
 app.post("/api/auth/invite", async (req, res) => {
   const ip = getRequestIp(req);
-  const inviteFailure = inviteFailures.get(ip) ?? { count: 0, lockedUntil: 0 };
+  const inviteFailure = getInviteFailure(ip);
   if (inviteFailure.lockedUntil > Date.now()) {
     const retrySeconds = Math.ceil((inviteFailure.lockedUntil - Date.now()) / 1000);
     return res.status(429).json({ message: `\u5C1D\u8BD5\u6B21\u6570\u8FC7\u591A\uFF0C\u8BF7 ${retrySeconds} \u79D2\u540E\u518D\u8BD5` });
@@ -315,6 +354,29 @@ app.get("/api/orders", requireRole(["super_admin", "admin", "client"]), async (r
   res.json({ orders: rows.map(toPublicOrder), page, pageSize, total: Number(total?.count ?? 0) });
 });
 
+app.get("/api/orders/stats", requireRole(["super_admin", "admin", "client"]), async (req, res) => {
+  const user = getRequestUser(req);
+  const oc = user.role === "client" ? "WHERE orders.created_by = ?" : "";
+  const params = user.role === "client" ? [user.id] : [];
+  const today = new Date().toISOString().slice(0, 10);
+  const stats = db.prepare(`
+    SELECT
+      SUM(CASE WHEN deleted_at IS NULL THEN 1 ELSE 0 END) as total,
+      SUM(CASE WHEN deleted_at IS NULL AND print_status = 'printed' THEN 1 ELSE 0 END) as printed,
+      SUM(CASE WHEN deleted_at IS NULL AND print_status != 'printed' THEN 1 ELSE 0 END) as pending,
+      SUM(CASE WHEN deleted_at IS NOT NULL THEN 1 ELSE 0 END) as deleted,
+      SUM(CASE WHEN deleted_at IS NULL AND date(generated_at) = date(?) THEN 1 ELSE 0 END) as today
+    FROM orders ${oc}
+  `).get(today, ...params);
+  res.json({
+    total: Number(stats?.total ?? 0),
+    printed: Number(stats?.printed ?? 0),
+    pending: Number(stats?.pending ?? 0),
+    deleted: Number(stats?.deleted ?? 0),
+    today: Number(stats?.today ?? 0)
+  });
+});
+
 app.post("/api/layout/preview", requireRole(["super_admin", "admin"]), async (req, res) => {
   try {
     const layout = computeImpositionLayout(req.body.layoutOptions ?? req.body);
@@ -335,7 +397,7 @@ app.post("/api/orders/imposition", requireRole(["super_admin", "admin"]), async 
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
     writeAuditLog(req, "orders.imposition", "orders", orderIds.join(","), { count: orders.length, paperPreset: layout.paperPreset });
     res.send(pdfBuffer);
-  } catch (error) { console.error(error); res.status(500).json({ message: error.message || "Failed to create imposition PDF" }); }
+  } catch (error) { sendServerError(res, error, "Failed to create imposition PDF", "PDF_GENERATION_FAILED"); }
 });
 
 app.post("/api/orders/a4-layout", requireRole(["super_admin", "admin"]), async (req, res) => {
@@ -348,7 +410,7 @@ app.post("/api/orders/a4-layout", requireRole(["super_admin", "admin"]), async (
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
     res.send(pdfBuffer);
-  } catch (error) { console.error(error); res.status(500).json({ message: "Failed to create A4 layout PDF" }); }
+  } catch (error) { sendServerError(res, error, "Failed to create A4 layout PDF", "PDF_GENERATION_FAILED"); }
 });
 
 app.get("/api/orders/batch", requireRole(["super_admin", "admin"]), async (req, res) => {
@@ -390,11 +452,7 @@ app.post("/api/orders/direct-print", requireCustomerAccess, async (req, res) => 
     db.prepare("UPDATE orders SET print_status = 'printed' WHERE id = ? AND deleted_at IS NULL").run(order.id);
     writeAuditLog(req, "orders.direct_print", "order", order.id, { orderNo: order.order_no, printerName: result.printerName });
     res.status(201).json({ id: order.id, orderNo: order.order_no, generatedAt: order.generated_at, printerName: result.printerName, message: `\u6253\u5370\u5DF2\u53D1\u9001\uFF1A${result.printerName}` });
-  } catch (error) {
-    console.error(error);
-    writeAuditLog(req, "orders.direct_print_failed", "order", order.id, { orderNo: order.order_no, error: error.message });
-    res.status(500).json({ message: `\u6253\u5370\u5931\u8D25\uFF1A${error.message}\uFF1B\u8BA2\u5355 ${order.order_no} \u5DF2\u4FDD\u5B58\uFF0C\u8BF7\u68C0\u67E5\u6253\u5370\u673A\u540E\u5230\u540E\u53F0\u91CD\u6253`, id: order.id, orderNo: order.order_no, generatedAt: order.generated_at });
-  }
+  } catch (error) { console.error(error); writeAuditLog(req, "orders.direct_print_failed", "order", order.id, { orderNo: order.order_no, error: error.message }); res.status(500).json({ message: process.env.NODE_ENV === "production" ? `\u6253\u5370\u5931\u8D25\uFF1B\u8BA2\u5355 ${order.order_no} \u5DF2\u4FDD\u5B58\uFF0C\u8BF7\u68C0\u67E5\u6253\u5370\u673A\u540E\u5230\u540E\u53F0\u91CD\u6253` : `\u6253\u5370\u5931\u8D25\uFF1A${error.message}\uFF1B\u8BA2\u5355 ${order.order_no} \u5DF2\u4FDD\u5B58\uFF0C\u8BF7\u68C0\u67E5\u6253\u5370\u673A\u540E\u5230\u540E\u53F0\u91CD\u6253`, id: order.id, orderNo: order.order_no, generatedAt: order.generated_at }); }
 });
 
 app.patch("/api/orders/:id/print-status", requireRole(["super_admin", "admin"]), async (req, res) => {
@@ -423,12 +481,13 @@ app.patch("/api/orders/:id/restore", requireRole(["super_admin", "admin"]), asyn
 });
 
 // ---- Printer routes ----
-app.get("/api/printers", requireRole(["super_admin", "admin"]), async (_req, res) => {
+app.get("/api/printers", requireRole(["super_admin", "admin"]), async (req, res) => {
   try {
-    const printers = await getSystemPrinters();
+    const refresh = req.query.refresh === "true";
+    const printers = await getSystemPrinters({ refresh });
     const settings = await getSettings();
     res.json({ printers, defaultPrinter: printers.find((p) => p.isDefault)?.name ?? "", selectedPrinter: settings.selectedPrinter });
-  } catch (error) { console.error(error); res.status(500).json({ message: "Failed to read printers", printers: [] }); }
+  } catch (error) { sendServerError(res, error, "Failed to read printers", "PRINTER_READ_FAILED"); res.json({ printers: [], defaultPrinter: "", selectedPrinter: "" }); }
 });
 
 app.put("/api/printers/selected", requireRole(["super_admin"]), async (req, res) => {
@@ -444,7 +503,7 @@ app.post("/api/printers/test", requireRole(["super_admin", "admin"]), async (req
     const result = await printTicketDirect(testOrder, String(req.body?.printerName ?? ""));
     writeAuditLog(req, "printers.test", "printer", result.printerName, {});
     res.json({ ok: true, message: `\u6D4B\u8BD5\u6253\u5370\u5DF2\u53D1\u9001\uFF1A${result.printerName}`, printerName: result.printerName });
-  } catch (error) { console.error(error); res.status(500).json({ message: `\u6D4B\u8BD5\u6253\u5370\u5931\u8D25\uFF1A${error.message}` }); }
+  } catch (error) { sendServerError(res, error, "测试打印失败", "PRINT_TEST_FAILED"); }
 });
 
 app.post("/api/orders/:id/print", requireRole(["super_admin", "admin"]), async (req, res) => {
@@ -454,7 +513,7 @@ app.post("/api/orders/:id/print", requireRole(["super_admin", "admin"]), async (
     const result = await printOrderTicket(order, String(req.body?.printerName ?? ""));
     writeAuditLog(req, "orders.print", "order", order.id, { orderNo: order.order_no, printerName: result.printerName });
     res.json({ ok: true, message: `\u6253\u5370\u5DF2\u53D1\u9001\uFF1A${result.printerName}`, printerName: result.printerName, order: toPublicOrder(order) });
-  } catch (error) { console.error(error); res.status(500).json({ message: `\u6253\u5370\u5931\u8D25\uFF1A${error.message}`, order: toPublicOrder(order) }); }
+  } catch (error) { console.error(error); res.status(500).json({ message: process.env.NODE_ENV === "production" ? `\u6253\u5370\u5931\u8D25` : `\u6253\u5370\u5931\u8D25\uFF1A${error.message}`, order: toPublicOrder(order) }); }
 });
 
 app.post("/api/orders/:id/print-ticket", requireCustomerAccess, async (req, res) => {
@@ -466,7 +525,7 @@ app.post("/api/orders/:id/print-ticket", requireCustomerAccess, async (req, res)
     const result = await printOrderTicket(order, String(req.body?.printerName ?? ""));
     writeAuditLog(req, "orders.print_ticket", "order", order.id, { orderNo: order.order_no, printerName: result.printerName });
     res.json({ ok: true, message: `\u6253\u5370\u5DF2\u53D1\u9001\uFF1A${result.printerName}`, printerName: result.printerName, order: toPublicOrder(order) });
-  } catch (error) { console.error(error); res.status(500).json({ message: `\u6253\u5370\u5931\u8D25\uFF1A${error.message}`, order: toPublicOrder(order) }); }
+  } catch (error) { console.error(error); res.status(500).json({ message: process.env.NODE_ENV === "production" ? `\u6253\u5370\u5931\u8D25` : `\u6253\u5370\u5931\u8D25\uFF1A${error.message}`, order: toPublicOrder(order) }); }
 });
 
 // ---- Download routes ----

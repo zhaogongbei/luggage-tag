@@ -11,7 +11,11 @@ import { createTicketPdf } from "./pdf.js";
 function imageDataToBuffer(dataUrl) {
   const match = dataUrl.match(/^data:image\/png;base64,(.+)$/);
   if (!match) { throw new Error("Invalid PNG data URL"); }
-  return Buffer.from(match[1], "base64");
+  const buf = Buffer.from(match[1], "base64");
+  const sig = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  if (buf.length < 8 || !buf.subarray(0, 8).equals(sig)) { throw new Error("Not a valid PNG"); }
+  if (buf.length > 6 * 1024 * 1024) { throw new Error("PNG too large"); }
+  return buf;
 }
 
 function normalizeCustomerName(value) {

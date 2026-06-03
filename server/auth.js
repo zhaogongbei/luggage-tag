@@ -40,6 +40,30 @@ function recordLoginFailure(ip, failure) {
 
 function clearLoginFailure(ip) { loginFailures.delete(ip); }
 
+function getInviteFailure(ip) {
+  const failure = inviteFailures.get(ip) ?? { count: 0, lockedUntil: 0 };
+  if (failure.lockedUntil && failure.lockedUntil <= Date.now()) {
+    inviteFailures.delete(ip);
+    return { count: 0, lockedUntil: 0 };
+  }
+  return failure;
+}
+
+function cleanupAttempts() {
+  const now = Date.now();
+  for (const [ip, failure] of loginFailures.entries()) {
+    if (failure.lockedUntil && failure.lockedUntil <= now) {
+      loginFailures.delete(ip);
+    }
+  }
+  for (const [ip, failure] of inviteFailures.entries()) {
+    if (failure.lockedUntil && failure.lockedUntil <= now) {
+      inviteFailures.delete(ip);
+    }
+  }
+}
+setInterval(cleanupAttempts, 60_000).unref();
+
 function parseCookies(req) {
   const result = {};
   try {
@@ -212,7 +236,7 @@ function writeAuditLog(req, action, targetType = "", targetId = "", detail = {})
 
 export {
   getRequestIp, loginFailures, inviteFailures,
-  getLoginFailure, recordLoginFailure, clearLoginFailure,
+  getLoginFailure, recordLoginFailure, clearLoginFailure, getInviteFailure,
   parseCookies, createToken, getTokenRecord, isValidToken,
   getSessionUser, getRequestUser, deleteToken,
   shouldUseSecureCookie, setSessionCookie, setInviteCookie,
