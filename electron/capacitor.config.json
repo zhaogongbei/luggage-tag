@@ -1,0 +1,10 @@
+{
+  "appId": "com.ycgg.luggagetag",
+  "appName": "LuggageTag",
+  "webDir": "dist",
+  "server": {
+    "url": "https://tag.ycgg.cc.cd",
+    "cleartext": false
+  },
+  "electron": {}
+}

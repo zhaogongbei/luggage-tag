@@ -19,8 +19,9 @@ import {
   X
 } from "lucide-react";
 import "./styles.css";
+import EscPos from "./plugins/escpos";
 
-const API_BASE = import.meta.env.DEV ? `${window.location.protocol}//${window.location.hostname}:3001` : "";
+const API_BASE = import.meta.env.VITE_API_BASE || (import.meta.env.DEV ? `${window.location.protocol}//${window.location.hostname}:3001` : window.location.origin);
 const APP_VERSION = "V1.4.40";
 const BRAND_LOGO_SRC = `${API_BASE}/brand-logo?v=${encodeURIComponent(APP_VERSION)}`;
 const roleLabels = {
@@ -579,14 +580,46 @@ function CustomerPage({ settings, previewNumber, onCreated, autoPrint = false, a
     setMessage("");
     try {
       const pngDataUrl = canvasRef.current.toDataURL("image/png");
-      const response = await apiFetch("/api/orders/direct-print", {
+
+      // 1. 创建订单（不打印，只取号和存记录）
+      const response = await apiFetch("/api/orders", {
         method: "POST",
         body: JSON.stringify({ templateId, customerText: finalName, pngDataUrl })
       });
       const data = await response.json();
       if (!response.ok) {
-        throw new Error(data.message || "打印失败");
+        throw new Error(data.message || "订单创建失败");
       }
+
+      // 2. 打印（按环境选择路径）
+      const isCapacitorNative = typeof window !== 'undefined' && window.Capacitor?.isNativePlatform?.() && window.Capacitor?.getPlatform?.() !== 'electron';
+      if (isCapacitorNative) {
+        // App 内 → 原生 USB ESC/POS
+        try {
+          await EscPos.print({
+            customerText: finalName,
+            orderNo: data.orderNo,
+            timestamp: new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })
+          });
+        } catch (usbError) {
+          // USB 失败 → 回退到当前窗口打印页（避免 window.open 被弹窗拦截）
+          window.location.href = `/ticket/${data.id}?autoPrint=1`;
+          return;
+        }
+      } else if (autoPrint) {
+        // Kiosk 模式 → 使用已创建的订单 ID 进行打印（不再重复创建订单）
+        const printResponse = await apiFetch(`/api/orders/${data.id}/print`, {
+          method: "POST"
+        });
+        if (!printResponse.ok) {
+          const printData = await printResponse.json();
+          throw new Error(printData.message || "打印失败");
+        }
+      } else {
+        // 普通浏览器 → 浏览器打印窗
+        window.open(`/ticket/${data.id}?autoPrint=1`, '_blank');
+      }
+
       setMessage(`✓ 打印成功\n编号：${data.orderNo}`);
       setMessageType("success");
       onCreated();
@@ -687,31 +720,39 @@ function AccessGate({ access, onAuthenticated }) {
   async function login(event) {
     event.preventDefault();
     setMessage("");
-    const response = await apiFetch("/api/auth/login", {
-      method: "POST",
-      body: JSON.stringify(loginForm)
-    });
-    const data = await response.json();
-    if (!response.ok) {
-      setMessage(data.message || "登录失败");
-      return;
+    try {
+      const response = await apiFetch("/api/auth/login", {
+        method: "POST",
+        body: JSON.stringify(loginForm)
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        setMessage(data.message || "登录失败");
+        return;
+      }
+      onAuthenticated(data);
+    } catch (error) {
+      setMessage("网络异常，请检查网络连接后重试");
     }
-    onAuthenticated(data);
   }
 
   async function enterInvite(event) {
     event.preventDefault();
     setMessage("");
-    const response = await apiFetch("/api/auth/invite", {
-      method: "POST",
-      body: JSON.stringify({ inviteCode })
-    });
-    const data = await response.json();
-    if (!response.ok) {
-      setMessage(data.message || "邀请码无效");
-      return;
+    try {
+      const response = await apiFetch("/api/auth/invite", {
+        method: "POST",
+        body: JSON.stringify({ inviteCode })
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        setMessage(data.message || "邀请码无效");
+        return;
+      }
+      onAuthenticated(data);
+    } catch (error) {
+      setMessage("网络异常，请检查网络连接后重试");
     }
-    onAuthenticated(data);
   }
 
   return (
@@ -769,9 +810,14 @@ function StaffOnlyPage({ children }) {
 
   useEffect(() => {
     async function loadAccess() {
-      const response = await apiFetch("/api/auth/status");
-      setAccess(await response.json());
-      setLoading(false);
+      try {
+        const response = await apiFetch("/api/auth/status");
+        setAccess(await response.json());
+      } catch {
+        setAccess(null);
+      } finally {
+        setLoading(false);
+      }
     }
     loadAccess();
   }, []);
@@ -859,24 +905,33 @@ function AdminPage({ settings, onSettingsSaved, access, onGoCustomer, onLogout }
   }, [settings]);
 
   async function loadOrders() {
-    const response = await apiFetch(`/api/orders${showDeletedOrders ? "?deleted=true" : ""}`);
-    const nextOrders = await response.json();
-    if (!response.ok) {
-      setPrinterMessage(nextOrders.message || "订单加载失败");
-      return;
+    try {
+      const response = await apiFetch(`/api/orders${showDeletedOrders ? "?deleted=true" : ""}`);
+      const data = await response.json();
+      if (!response.ok) {
+        setPrinterMessage(data.message || "订单加载失败");
+        return;
+      }
+      const nextOrders = Array.isArray(data) ? data : (data.orders ?? []);
+      setOrders(nextOrders);
+      setSelectedOrderIds((ids) => ids.filter((id) => nextOrders.some((order) => order.id === id)));
+    } catch (error) {
+      setPrinterMessage("订单加载失败，请检查网络连接");
     }
-    setOrders(nextOrders);
-    setSelectedOrderIds((ids) => ids.filter((id) => nextOrders.some((order) => order.id === id)));
   }
 
   async function loadPrinters() {
-    const response = await apiFetch("/api/printers");
-    const data = await response.json();
-    setPrinterState({
-      printers: data.printers ?? [],
-      defaultPrinter: data.defaultPrinter ?? "",
-      selectedPrinter: data.selectedPrinter ?? ""
-    });
+    try {
+      const response = await apiFetch("/api/printers");
+      const data = await response.json();
+      setPrinterState({
+        printers: data.printers ?? [],
+        defaultPrinter: data.defaultPrinter ?? "",
+        selectedPrinter: data.selectedPrinter ?? ""
+      });
+    } catch (error) {
+      setPrinterState({ printers: [], defaultPrinter: "", selectedPrinter: "" });
+    }
   }
 
   async function loadUsers() {
@@ -913,6 +968,8 @@ function AdminPage({ settings, onSettingsSaved, access, onGoCustomer, onLogout }
   }, []);
 
   useEffect(() => {
+    // Skip initial mount — already loaded by the first useEffect
+    if (!orders.length && !showDeletedOrders) return;
     loadOrders();
   }, [showDeletedOrders]);
 
@@ -981,11 +1038,15 @@ function AdminPage({ settings, onSettingsSaved, access, onGoCustomer, onLogout }
     ) {
       return;
     }
-    const response = await apiFetch("/api/settings", {
-      method: "PUT",
-      body: JSON.stringify(form)
-    });
-    onSettingsSaved(await response.json());
+    try {
+      const response = await apiFetch("/api/settings", {
+        method: "PUT",
+        body: JSON.stringify(form)
+      });
+      onSettingsSaved(await response.json());
+    } catch (error) {
+      setPrinterMessage("设置保存失败，请检查网络连接");
+    }
   }
 
   async function resetEvent() {
@@ -996,28 +1057,36 @@ function AdminPage({ settings, onSettingsSaved, access, onGoCustomer, onLogout }
     if (!window.confirm("确认开启新活动并重置编号？历史订单编号不会改变。")) {
       return;
     }
-    const response = await apiFetch("/api/events/reset", {
-      method: "POST",
-      body: JSON.stringify(eventForm)
-    });
-    const data = await response.json();
-    if (!response.ok) {
-      setPrinterMessage(data.message || "新活动重置失败");
-      return;
+    try {
+      const response = await apiFetch("/api/events/reset", {
+        method: "POST",
+        body: JSON.stringify(eventForm)
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        setPrinterMessage(data.message || "新活动重置失败");
+        return;
+      }
+      onSettingsSaved(data.settings);
+      setPrinterMessage("新活动已启用，后续订单将使用新编号");
+      loadOrders();
+    } catch (error) {
+      setPrinterMessage("新活动重置失败，请检查网络连接");
     }
-    onSettingsSaved(data.settings);
-    setPrinterMessage("新活动已启用，后续订单将使用新编号");
-    loadOrders();
   }
 
   async function togglePrinted(order) {
-    await apiFetch(`/api/orders/${order.id}/print-status`, {
-      method: "PATCH",
-      body: JSON.stringify({
-        printStatus: order.print_status === "printed" ? "pending" : "printed"
-      })
-    });
-    loadOrders();
+    try {
+      await apiFetch(`/api/orders/${order.id}/print-status`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          printStatus: order.print_status === "printed" ? "pending" : "printed"
+        })
+      });
+      loadOrders();
+    } catch (error) {
+      setPrinterMessage("打印状态更新失败");
+    }
   }
 
   async function deleteOrder(order) {
@@ -1641,7 +1710,7 @@ function AdminPage({ settings, onSettingsSaved, access, onGoCustomer, onLogout }
         </div>
         {userMessage && <p className="message neutral">{userMessage}</p>}
         <div className="table-wrap">
-          <table>
+          <table className="users-table">
             <thead>
               <tr>
                 <th>ID</th>
@@ -1747,7 +1816,7 @@ function AdminPage({ settings, onSettingsSaved, access, onGoCustomer, onLogout }
           <button className="icon-btn" onClick={loadLogs} title="刷新" type="button"><RefreshCw size={18} /></button>
         </div>
         <div className="table-wrap">
-          <table>
+          <table className="logs-table">
             <thead>
               <tr>
                 <th>时间</th>
@@ -1829,7 +1898,7 @@ function AdminPage({ settings, onSettingsSaved, access, onGoCustomer, onLogout }
           </label>
         </div>
         <div className="table-wrap">
-          <table>
+          <table className="orders-table">
             <thead>
               <tr>
                 <th>
@@ -2003,7 +2072,11 @@ function App() {
   }
 
   async function logout() {
-    await apiFetch("/api/auth/logout", { method: "POST" });
+    try {
+      await apiFetch("/api/auth/logout", { method: "POST" });
+    } catch {
+      // Ignore logout errors — proceed with local state reset
+    }
     setPage("customer");
     setAccess(null);
     loadAccessAndState();
@@ -2165,6 +2238,8 @@ function App() {
       </header>
       {loadError && <p className="message app-message">{loadError}</p>}
       <CustomerPage
+        autoPrint={autoPrint}
+        autoReturn={autoReturn}
         onCreated={loadState}
         previewNumber={previewNumber}
         settings={settings}

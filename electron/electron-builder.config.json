@@ -1,0 +1,17 @@
+{
+  "appId": "com.ycgg.luggagetag",
+  "directories": {
+    "buildResources": "resources",
+    "output": "dist"
+  },
+  "files": [
+    "assets/**/*",
+    "build/**/*",
+    "capacitor.config.*",
+    "app/**/*"
+  ],
+  "win": {
+    "target": "portable"
+  },
+  "asar": false
+}

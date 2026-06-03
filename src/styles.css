@@ -1986,17 +1986,95 @@ tbody tr:hover {
     font-size: 12px;
     font-weight: 700;
     margin-right: 18px;
+    flex-shrink: 0;
   }
-  table td:nth-child(2)::before { content: "编号"; }
-  table td:nth-child(3)::before { content: "活动"; }
-  table td:nth-child(4)::before { content: "客户文字"; }
-  table td:nth-child(5)::before { content: "模板"; }
-  table td:nth-child(6)::before { content: "生成时间"; }
-  table td:nth-child(7)::before { content: "打印状态"; }
-  table td:nth-child(8)::before { content: "操作"; }
-  table td:first-child:empty { display: none; }
+  /* Orders table */
+  .orders-table td:nth-child(1):not(:empty)::before { content: "选择"; }
+  .orders-table td:nth-child(2)::before { content: "编号"; }
+  .orders-table td:nth-child(3)::before { content: "活动"; }
+  .orders-table td:nth-child(4)::before { content: "客户文字"; }
+  .orders-table td:nth-child(5)::before { content: "模板"; }
+  .orders-table td:nth-child(6)::before { content: "生成时间"; }
+  .orders-table td:nth-child(7)::before { content: "打印状态"; }
+  .orders-table td:nth-child(8)::before { content: "操作"; }
+  .orders-table td:first-child:empty { display: none; }
+  /* Users table */
+  .users-table td:nth-child(1)::before { content: "ID"; }
+  .users-table td:nth-child(2)::before { content: "账号"; }
+  .users-table td:nth-child(3)::before { content: "角色"; }
+  .users-table td:nth-child(4)::before { content: "状态"; }
+  .users-table td:nth-child(5)::before { content: "最后登录"; }
+  .users-table td:nth-child(6)::before { content: "创建时间"; }
+  .users-table td:nth-child(7)::before { content: "操作"; }
+  /* Audit logs table */
+  .logs-table td:nth-child(1)::before { content: "时间"; }
+  .logs-table td:nth-child(2)::before { content: "账号"; }
+  .logs-table td:nth-child(3)::before { content: "角色"; }
+  .logs-table td:nth-child(4)::before { content: "动作"; }
+  .logs-table td:nth-child(5)::before { content: "对象"; }
+  .logs-table td:nth-child(6)::before { content: "IP"; }
   table td:last-child { border-bottom: 0; }
   .actions { justify-content: flex-end; }
+}
+
+/* ── Dashboard hero wrap fix (existing breakpoints) ── */
+@media (max-width: 920px) {
+  .dashboard-hero { flex-wrap: wrap; gap: 12px; }
+}
+@media (min-width: 768px) and (max-width: 1024px) and (orientation: portrait) {
+  .dashboard-hero { flex-wrap: wrap; gap: 12px; }
+}
+
+/* ── Very small screens (<480px) ── */
+@media (max-width: 480px) {
+  .admin-header {
+    gap: 8px;
+    padding: 10px 12px;
+  }
+  .admin-top-nav button {
+    font-size: 12px;
+    height: 32px;
+    padding: 0 10px;
+  }
+  .admin-main { padding: 12px; gap: 10px; }
+  .admin-page-heading { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .admin-page-heading h2 { font-size: 20px; }
+  .metric-grid { gap: 10px; }
+  .metric-card { padding: 14px; }
+  .metric-card strong { font-size: 26px; }
+  .admin-console .panel { padding: 14px; }
+  .admin-console .section-title { font-size: 14px; }
+  .admin-console td { font-size: 13px; }
+  .dashboard-hero { flex-direction: column; align-items: flex-start; padding: 16px; }
+  .dashboard-hero h2 { font-size: 22px; }
+  .order-filter-bar { padding: 10px; gap: 10px; }
+  .table-wrap { border-radius: 12px; }
+  table td { padding: 10px 12px; }
+  .actions { gap: 4px; }
+  .actions a, .actions button, .icon-btn { padding: 6px 8px; font-size: 12px; }
+  .more-menu-popover { min-width: 130px; right: -8px; }
+  .admin-drawer { max-width: 100vw; width: 100%; }
+  .admin-drawer-header, .admin-drawer-footer { padding: 14px 16px; }
+  .admin-drawer-body { padding: 14px; }
+  .admin-drawer-header h3 { font-size: 17px; }
+  .topbar { padding: 12px; }
+  .workspace { padding: 12px; gap: 18px; }
+  .template-grid { grid-template-columns: 1fr; }
+  .access-page { padding: 16px; }
+  .access-panel { padding: 18px; }
+  .printer-grid { grid-template-columns: 1fr; }
+  .layout-grid { grid-template-columns: 1fr; }
+  .layout-grid.compact { grid-template-columns: 1fr; }
+  .settings-grid { grid-template-columns: 1fr; }
+
+  /* Creator kiosk (customization page) on small screens */
+  .creator-topbar { padding: 12px clamp(12px, 4vw, 24px); min-height: 70px; }
+  .creator-kiosk { padding: clamp(6px, 1vh, 12px) clamp(12px, 4vw, 24px) clamp(16px, 3vh, 32px); }
+  .creator-action-panel { padding: clamp(16px, 3vh, 24px); }
+  .creator-color-choice button { min-height: 46px; font-size: 14px; }
+  .creator-name-field input { font-size: clamp(28px, 10vw, 48px); padding: clamp(16px, 3vh, 28px); }
+  .creator-submit-btn { font-size: clamp(24px, 6vw, 36px); min-height: 64px; padding: 16px 20px; }
+  .creator-kiosk.keyboard-open .creator-preview-stage .tag-canvas { max-height: 22dvh; }
 }
 
 @media print {

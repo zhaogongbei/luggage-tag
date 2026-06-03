@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">LuggageTag</string>
+    <string name="title_activity_main">LuggageTag</string>
+    <string name="package_name">com.ycgg.luggagetag</string>
+    <string name="custom_url_scheme">com.ycgg.luggagetag</string>
+</resources>
