@@ -1,0 +1,12 @@
+{
+  "createdAt": "2026-06-04T04:38:22Z",
+  "nextAction": "归档任务并提交推送",
+  "domain": "desktop",
+  "currentPhase": "completed",
+  "title": "修复桌面端启动时缺少 app-update.yml 的未处理报错",
+  "id": "fix-desktop-update-yml-error",
+  "branch": "master",
+  "status": "completed",
+  "risk": "medium",
+  "complexity": "S"
+}
