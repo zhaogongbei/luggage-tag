@@ -5,6 +5,8 @@ import { app, MenuItem } from 'electron';
 import electronIsDev from 'electron-is-dev';
 import unhandled from 'electron-unhandled';
 import { autoUpdater } from 'electron-updater';
+import { existsSync } from 'fs';
+import { join } from 'path';
 
 import { ElectronCapacitorApp, setupContentSecurityPolicy, setupReloadWatcher } from './setup';
 import { startLocalBackend, stopLocalBackend } from './local-backend';
@@ -29,6 +31,10 @@ function escapeHtml(value: string): string {
     const entities = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
     return entities[char];
   });
+}
+
+function canCheckForUpdates(): boolean {
+  return !electronIsDev && app.isPackaged && existsSync(join(process.resourcesPath, 'app-update.yml'));
 }
 
 // Run Application
@@ -65,8 +71,12 @@ function escapeHtml(value: string): string {
   setupContentSecurityPolicy(myCapacitorApp.getCustomURLScheme(), capConfig.server?.url);
   // Initialize our app, build windows, and load content.
   await myCapacitorApp.init();
-  // Check for updates if we are in a packaged app.
-  autoUpdater.checkForUpdatesAndNotify();
+  // Directory builds do not include app-update.yml, so skip updater checks unless builder generated config exists.
+  if (canCheckForUpdates()) {
+    autoUpdater.checkForUpdatesAndNotify().catch((error) => {
+      console.warn('Auto update check skipped:', error?.message ?? error);
+    });
+  }
 })();
 
 // Handle when all of our windows are close (platforms have their own expectations).
