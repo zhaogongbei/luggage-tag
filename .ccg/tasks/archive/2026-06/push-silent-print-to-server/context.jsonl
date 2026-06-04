@@ -1,0 +1,5 @@
+{"path":"/opt/luggage-tag/app","reason":"server deployment target"}
+{"path":"/opt/luggage-tag/data","reason":"persistent data directory preserved"}
+{"path":"/etc/systemd/system/luggage-tag.service","reason":"process manager"}
+{"path":"https://a.zhaojiabin.com/","reason":"public site check"}
+{"path":"http://127.0.0.1:3108/health","reason":"internal service health check"}

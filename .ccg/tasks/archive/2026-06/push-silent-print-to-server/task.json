@@ -1,0 +1,12 @@
+{
+  "id": "push-silent-print-to-server",
+  "title": "推送静默打印优化到服务器",
+  "status": "completed",
+  "complexity": "M",
+  "risk": "high",
+  "domain": "deployment",
+  "currentPhase": "completed",
+  "nextAction": "归档任务",
+  "createdAt": "2026-06-04T02:40:30Z",
+  "branch": "master"
+}
