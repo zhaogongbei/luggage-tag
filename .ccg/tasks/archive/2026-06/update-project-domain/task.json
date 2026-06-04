@@ -1,0 +1,12 @@
+{
+  "id": "update-project-domain",
+  "title": "更新项目域名为 tag.ycgg.cc.cd",
+  "status": "completed",
+  "complexity": "S",
+  "risk": "low",
+  "domain": "docs",
+  "currentPhase": "completed",
+  "nextAction": "归档任务",
+  "createdAt": "2026-06-04T02:58:11Z",
+  "branch": "master"
+}
