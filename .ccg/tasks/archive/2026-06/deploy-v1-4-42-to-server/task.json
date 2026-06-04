@@ -1,0 +1,12 @@
+{
+  "id": "deploy-v1-4-42-to-server",
+  "title": "部署 V1.4.42 到生产服务器",
+  "status": "completed",
+  "complexity": "M",
+  "risk": "high",
+  "domain": "deployment",
+  "currentPhase": "completed",
+  "nextAction": "归档任务并提交",
+  "createdAt": "2026-06-04T03:35:00Z",
+  "branch": "master"
+}
