@@ -4,7 +4,7 @@ import { apiFetch } from "../lib/api";
 import { normalizeLayoutOptions, chunkOrders } from "../lib/layout";
 import { TicketPrint } from "../components/TicketPrint";
 
-export function ImpositionPrintPage({ orderIds, layoutOptions }) {
+export function ImpositionPrintPage({ orderIds, layoutOptions, autoPrint }) {
   const [orders, setOrders] = useState([]);
   const [layout, setLayout] = useState(null);
   const [error, setError] = useState("");
@@ -45,12 +45,12 @@ export function ImpositionPrintPage({ orderIds, layoutOptions }) {
   }, [layout, layoutOptions]);
 
   useEffect(() => {
-    if (orders.length && layout) {
+    if (orders.length && layout && autoPrint) {
       const timer = window.setTimeout(() => window.print(), 600);
       return () => window.clearTimeout(timer);
     }
     return undefined;
-  }, [orders, layout]);
+  }, [orders, layout, autoPrint]);
 
   if (error) {
     return (

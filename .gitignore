@@ -4,3 +4,4 @@ data/
 *.log
 *.err.log
 tmp-test-data*/
+electron/local-server/

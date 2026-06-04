@@ -60,6 +60,7 @@ export class ElectronCapacitorApp {
   private loadWebApp;
   private customScheme: string;
   private serverUrl: string | null;
+  private allowedNavigationOrigin: string | null;
 
   constructor(
     capacitorFileConfig: CapacitorElectronConfig,
@@ -70,6 +71,7 @@ export class ElectronCapacitorApp {
 
     this.customScheme = this.CapacitorFileConfig.electron?.customUrlScheme ?? 'capacitor-electron';
     this.serverUrl = this.CapacitorFileConfig.server?.url ?? null;
+    this.allowedNavigationOrigin = this.serverUrl ? new URL(this.serverUrl).origin : null;
     console.log('ElectronCapacitorApp: serverUrl =', this.serverUrl);
 
     if (trayMenuTemplate) {
@@ -133,7 +135,7 @@ export class ElectronCapacitorApp {
       width: this.mainWindowState.width,
       height: this.mainWindowState.height,
       webPreferences: {
-        nodeIntegration: true,
+        nodeIntegration: false,
         contextIsolation: true,
         // Use preload to inject the electron varriant overrides for capacitor plugins.
         // preload: join(app.getAppPath(), "node_modules", "@capacitor-community", "electron", "dist", "runtime", "electron-rt.js"),
@@ -201,14 +203,18 @@ export class ElectronCapacitorApp {
 
     // Security
     this.MainWindow.webContents.setWindowOpenHandler((details) => {
-      if (!this.serverUrl && !details.url.includes(this.customScheme)) {
-        return { action: 'deny' };
-      } else {
+      if (this.isAllowedNavigationUrl(details.url)) {
         return { action: 'allow' };
       }
+      return { action: 'deny' };
     });
-    this.MainWindow.webContents.on('will-navigate', (event, _newURL) => {
-      if (!this.serverUrl && !this.MainWindow.webContents.getURL().includes(this.customScheme)) {
+    this.MainWindow.webContents.on('will-navigate', (event, newURL) => {
+      if (!this.isAllowedNavigationUrl(newURL)) {
+        event.preventDefault();
+      }
+    });
+    this.MainWindow.webContents.on('will-redirect', (event, newURL) => {
+      if (!this.isAllowedNavigationUrl(newURL)) {
         event.preventDefault();
       }
     });
@@ -231,6 +237,17 @@ export class ElectronCapacitorApp {
         CapElectronEventEmitter.emit('CAPELECTRON_DeeplinkListenerInitialized', '');
       }, 400);
     });
+  }
+
+  private isAllowedNavigationUrl(url: string): boolean {
+    if (this.allowedNavigationOrigin) {
+      try {
+        return new URL(url).origin === this.allowedNavigationOrigin;
+      } catch {
+        return false;
+      }
+    }
+    return url.startsWith(`${this.customScheme}://`);
   }
 }
 

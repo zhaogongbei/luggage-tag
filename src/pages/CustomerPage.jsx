@@ -5,12 +5,27 @@ import { templates } from "../lib/constants";
 import { normalizeCustomerName, finalizeCustomerName, isValidCustomerName } from "../lib/validate";
 import { CanvasPreview } from "../components/CanvasPreview";
 
+function isLocalPrintEnvironment() {
+  const hostname = window.location.hostname;
+  const userAgent = window.navigator.userAgent.toLowerCase();
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || userAgent.includes("electron");
+}
+
+function getTicketPrintUrl(orderId, { autoReturn = false } = {}) {
+  const params = new URLSearchParams({ autoPrint: "1" });
+  if (autoReturn) {
+    params.set("autoReturn", "1");
+  }
+  return `/ticket/${orderId}?${params.toString()}`;
+}
+
 export function CustomerPage({ settings, previewNumber, onCreated }) {
   const [templateId, setTemplateId] = useState("template_01");
   const [customerText, setCustomerText] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("neutral");
+  const [fallbackOrder, setFallbackOrder] = useState(null);
   const [keyboardOpen, setKeyboardOpen] = useState(false);
   const [isComposingName, setIsComposingName] = useState(false);
   const canvasRef = useRef(null);
@@ -80,15 +95,26 @@ export function CustomerPage({ settings, previewNumber, onCreated }) {
     }
     setBusy(true);
     setMessage("");
+    setFallbackOrder(null);
     try {
       const pngDataUrl = canvasRef.current.toDataURL("image/png");
-      const response = await apiFetch("/api/orders/direct-print", {
+      const localPrint = isLocalPrintEnvironment();
+      const response = await apiFetch(localPrint ? "/api/orders/direct-print" : "/api/orders", {
         method: "POST",
         body: JSON.stringify({ templateId, customerText: finalName, pngDataUrl })
       });
       const data = await response.json();
       if (!response.ok) {
+        if (localPrint && data.id) {
+          setFallbackOrder({ id: data.id, orderNo: data.orderNo || data.order_no || "" });
+          Promise.resolve(onCreated?.()).catch(() => {});
+        }
         throw new Error(data.message || "打印失败，订单已保存后可在后台重打");
+      }
+
+      if (!localPrint) {
+        window.location.assign(getTicketPrintUrl(data.id, { autoReturn: true }));
+        return;
       }
 
       setMessage(`打印成功\n编号：${data.orderNo}`);
@@ -177,6 +203,11 @@ export function CustomerPage({ settings, previewNumber, onCreated }) {
           {busy ? "打印中" : "打印"}
         </button>
         {message && <p className={`message ${messageType}`}>{message.split("\n").map((line) => <span key={line}>{line}</span>)}</p>}
+        {fallbackOrder && (
+          <a className="secondary-btn creator-fallback-print" href={getTicketPrintUrl(fallbackOrder.id)}>
+            打开浏览器打印页{fallbackOrder.orderNo ? `：${fallbackOrder.orderNo}` : ""}
+          </a>
+        )}
       </form>
     </main>
   );

@@ -16,6 +16,7 @@ import { AdminPage } from "./pages/AdminPage";
 
 function App() {
   const pathname = window.location.pathname;
+  const params = new URLSearchParams(window.location.search);
   const printMatch = pathname.match(/^\/print\/(\d+)$/);
   const ticketMatch = window.location.pathname.match(/^\/ticket\/(\d+)$/);
   const impositionPrintMatch = pathname === "/print-layout" || pathname === "/print-a4";
@@ -98,17 +99,16 @@ function App() {
   if (printMatch) {
     return (
       <StaffOnlyPage>
-        <PrintPage orderId={printMatch[1]} />
+        <PrintPage autoPrint={parseBooleanParam(params.get("autoPrint"))} orderId={printMatch[1]} />
       </StaffOnlyPage>
     );
   }
 
   if (ticketMatch) {
-    return <CustomerTicketPrintPage autoReturn={parseBooleanParam(new URLSearchParams(window.location.search).get("autoReturn"))} orderId={ticketMatch[1]} />;
+    return <CustomerTicketPrintPage autoPrint={parseBooleanParam(params.get("autoPrint"))} autoReturn={parseBooleanParam(params.get("autoReturn"))} orderId={ticketMatch[1]} />;
   }
 
   if (impositionPrintMatch) {
-    const params = new URLSearchParams(window.location.search);
     const orderIds = params.get("ids")?.split(",").map(Number).filter(Boolean) ?? [];
     const layoutParam = params.get("layout");
     let layoutOptions = defaultLayoutOptions;
@@ -121,7 +121,7 @@ function App() {
     }
     return (
       <StaffOnlyPage>
-        <ImpositionPrintPage orderIds={orderIds} layoutOptions={layoutOptions} />
+        <ImpositionPrintPage autoPrint={parseBooleanParam(params.get("autoPrint"))} orderIds={orderIds} layoutOptions={layoutOptions} />
       </StaffOnlyPage>
     );
   }

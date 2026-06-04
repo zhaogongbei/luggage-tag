@@ -7,6 +7,7 @@ import unhandled from 'electron-unhandled';
 import { autoUpdater } from 'electron-updater';
 
 import { ElectronCapacitorApp, setupContentSecurityPolicy, setupReloadWatcher } from './setup';
+import { startLocalBackend, stopLocalBackend } from './local-backend';
 
 // Graceful handling of unhandled errors.
 unhandled();
@@ -21,28 +22,46 @@ const appMenuBarMenuTemplate: (MenuItemConstructorOptions | MenuItem)[] = [
 // Get Config options from capacitor.config
 const capacitorFileConfig: CapacitorElectronConfig = getCapacitorElectronConfig();
 
-// Initialize our app. You can pass menu templates into the app here.
-// const myCapacitorApp = new ElectronCapacitorApp(capacitorFileConfig);
-const myCapacitorApp = new ElectronCapacitorApp(capacitorFileConfig, trayMenuTemplate, appMenuBarMenuTemplate);
+let myCapacitorApp: ElectronCapacitorApp | null = null;
 
-// If deeplinking is enabled then we will set it up here.
-if (capacitorFileConfig.electron?.deepLinkingEnabled) {
-  setupElectronDeepLinking(myCapacitorApp, {
-    customProtocol: capacitorFileConfig.electron.deepLinkingCustomProtocol ?? 'mycapacitorapp',
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (char) => {
+    const entities = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+    return entities[char];
   });
-}
-
-// If we are in Dev mode, use the file watcher components.
-if (electronIsDev) {
-  setupReloadWatcher(myCapacitorApp);
 }
 
 // Run Application
 (async () => {
   // Wait for electron app to be ready.
   await app.whenReady();
-  // Security - Set Content-Security-Policy based on whether or not we are in dev mode.
   const capConfig = capacitorFileConfig;
+  try {
+    const localBackendUrl = await startLocalBackend();
+    capConfig.server = { ...(capConfig.server ?? {}), url: `${localBackendUrl}/creator`, cleartext: true };
+  } catch (error) {
+    console.error('Failed to start local backend:', error);
+    capConfig.server = {
+      ...(capConfig.server ?? {}),
+      url: `data:text/html;charset=utf-8,${encodeURIComponent(
+        `<main style="font-family: sans-serif; padding: 32px; line-height: 1.6"><h1>本地打印服务启动失败</h1><p>${escapeHtml(
+          String(error?.message ?? error)
+        )}</p><p>请确认已安装 Node.js 22.5 或更高版本，并已运行桌面端准备命令。</p></main>`
+      )}`,
+      cleartext: true,
+    };
+  }
+  // Initialize our app after the local backend URL has been resolved.
+  myCapacitorApp = new ElectronCapacitorApp(capConfig, trayMenuTemplate, appMenuBarMenuTemplate);
+  if (capConfig.electron?.deepLinkingEnabled) {
+    setupElectronDeepLinking(myCapacitorApp, {
+      customProtocol: capConfig.electron.deepLinkingCustomProtocol ?? 'mycapacitorapp',
+    });
+  }
+  if (electronIsDev) {
+    setupReloadWatcher(myCapacitorApp);
+  }
+  // Security - Set Content-Security-Policy based on whether or not we are in dev mode.
   setupContentSecurityPolicy(myCapacitorApp.getCustomURLScheme(), capConfig.server?.url);
   // Initialize our app, build windows, and load content.
   await myCapacitorApp.init();
@@ -59,11 +78,15 @@ app.on('window-all-closed', function () {
   }
 });
 
+app.on('before-quit', () => {
+  stopLocalBackend();
+});
+
 // When the dock icon is clicked.
 app.on('activate', async function () {
   // On OS X it's common to re-create a window in the app when the
   // dock icon is clicked and there are no other windows open.
-  if (myCapacitorApp.getMainWindow().isDestroyed()) {
+  if (myCapacitorApp?.getMainWindow().isDestroyed()) {
     await myCapacitorApp.init();
   }
 });

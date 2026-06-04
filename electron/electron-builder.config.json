@@ -10,6 +10,15 @@
     "capacitor.config.*",
     "app/**/*"
   ],
+  "extraResources": [
+    {
+      "from": "local-server",
+      "to": "local-server",
+      "filter": [
+        "**/*"
+      ]
+    }
+  ],
   "win": {
     "target": "portable"
   },

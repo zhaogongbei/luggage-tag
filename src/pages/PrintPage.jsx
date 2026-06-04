@@ -3,7 +3,7 @@ import { Printer } from "lucide-react";
 import { apiFetch } from "../lib/api";
 import { TicketPrint } from "../components/TicketPrint";
 
-export function PrintPage({ orderId }) {
+export function PrintPage({ orderId, autoPrint }) {
   const [order, setOrder] = useState(null);
   const [error, setError] = useState("");
 
@@ -31,12 +31,12 @@ export function PrintPage({ orderId }) {
   }, [orderId]);
 
   useEffect(() => {
-    if (order) {
+    if (order && autoPrint) {
       const timer = window.setTimeout(() => window.print(), 350);
       return () => window.clearTimeout(timer);
     }
     return undefined;
-  }, [order]);
+  }, [order, autoPrint]);
 
   function printNow() {
     window.print();

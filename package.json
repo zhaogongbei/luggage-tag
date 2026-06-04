@@ -1,6 +1,6 @@
 {
   "name": "luggage-tag-mvp",
-  "version": "1.4.41",
+  "version": "1.4.42",
   "private": true,
   "type": "module",
   "engines": {
@@ -16,7 +16,10 @@
     "preview:lan": "vite preview --host 0.0.0.0",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "format": "prettier --write \"src/**/*.{js,jsx}\" \"server/**/*.js\""
+    "format": "prettier --write \"src/**/*.{js,jsx}\" \"server/**/*.js\"",
+    "desktop:prepare": "node scripts/prepare-desktop.mjs",
+    "desktop:pack": "npm run desktop:prepare && npm --prefix electron run electron:pack",
+    "desktop:make": "npm run desktop:prepare && npm --prefix electron run electron:make"
   },
   "dependencies": {
     "@capacitor-community/electron": "^5.0.1",
