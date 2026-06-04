@@ -1,0 +1,12 @@
+{
+  "title": "复核桌面端内置 Node 打包产物",
+  "currentPhase": "completed",
+  "risk": "low",
+  "id": "verify-bundled-node-desktop-package",
+  "status": "completed",
+  "branch": "master",
+  "nextAction": "归档复核任务",
+  "domain": "desktop",
+  "complexity": "S",
+  "createdAt": "2026-06-04T10:30:32Z"
+}
