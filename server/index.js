@@ -451,8 +451,8 @@ app.post("/api/orders/direct-print", requireCustomerAccess, async (req, res) => 
     const result = await printOrderTicket(order);
     db.prepare("UPDATE orders SET print_status = 'printed' WHERE id = ? AND deleted_at IS NULL").run(order.id);
     writeAuditLog(req, "orders.direct_print", "order", order.id, { orderNo: order.order_no, printerName: result.printerName });
-    res.status(201).json({ id: order.id, orderNo: order.order_no, generatedAt: order.generated_at, printerName: result.printerName, message: `\u6253\u5370\u5DF2\u53D1\u9001\uFF1A${result.printerName}` });
-  } catch (error) { console.error(error); writeAuditLog(req, "orders.direct_print_failed", "order", order.id, { orderNo: order.order_no, error: error.message }); res.status(500).json({ message: process.env.NODE_ENV === "production" ? `\u6253\u5370\u5931\u8D25\uFF1B\u8BA2\u5355 ${order.order_no} \u5DF2\u4FDD\u5B58\uFF0C\u8BF7\u68C0\u67E5\u6253\u5370\u673A\u540E\u5230\u540E\u53F0\u91CD\u6253` : `\u6253\u5370\u5931\u8D25\uFF1A${error.message}\uFF1B\u8BA2\u5355 ${order.order_no} \u5DF2\u4FDD\u5B58\uFF0C\u8BF7\u68C0\u67E5\u6253\u5370\u673A\u540E\u5230\u540E\u53F0\u91CD\u6253`, id: order.id, orderNo: order.order_no, generatedAt: order.generated_at }); }
+    res.status(201).json({ ok: true, id: order.id, orderNo: order.order_no, generatedAt: order.generated_at, printerName: result.printerName, printStatus: "printed", message: `\u6253\u5370\u5DF2\u53D1\u9001\uFF1A${result.printerName}` });
+  } catch (error) { console.error(error); writeAuditLog(req, "orders.direct_print_failed", "order", order.id, { orderNo: order.order_no, error: error.message }); res.status(500).json({ ok: false, message: process.env.NODE_ENV === "production" ? `\u6253\u5370\u5931\u8D25\uFF1B\u8BA2\u5355 ${order.order_no} \u5DF2\u4FDD\u5B58\uFF0C\u8BF7\u68C0\u67E5\u6253\u5370\u673A\u540E\u5230\u540E\u53F0\u91CD\u6253` : `\u6253\u5370\u5931\u8D25\uFF1A${error.message}\uFF1B\u8BA2\u5355 ${order.order_no} \u5DF2\u4FDD\u5B58\uFF0C\u8BF7\u68C0\u67E5\u6253\u5370\u673A\u540E\u5230\u540E\u53F0\u91CD\u6253`, id: order.id, orderNo: order.order_no, generatedAt: order.generated_at, printStatus: "pending" }); }
 });
 
 app.patch("/api/orders/:id/print-status", requireRole(["super_admin", "admin"]), async (req, res) => {
@@ -509,10 +509,13 @@ app.post("/api/printers/test", requireRole(["super_admin", "admin"]), async (req
 app.post("/api/orders/:id/print", requireRole(["super_admin", "admin"]), async (req, res) => {
   const order = getOrderById(req.params.id, { includeDeleted: true });
   if (!order) { return res.status(404).json({ message: "Order not found" }); }
+  if (order.deleted_at) { return res.status(409).json({ message: "\u8BA2\u5355\u5DF2\u5728\u56DE\u6536\u7AD9\uFF0C\u8BF7\u5148\u6062\u590D\u540E\u518D\u6253\u5370" }); }
   try {
     const result = await printOrderTicket(order, String(req.body?.printerName ?? ""));
+    db.prepare("UPDATE orders SET print_status = 'printed' WHERE id = ? AND deleted_at IS NULL").run(order.id);
+    const updatedOrder = getOrderById(req.params.id, { includeDeleted: true });
     writeAuditLog(req, "orders.print", "order", order.id, { orderNo: order.order_no, printerName: result.printerName });
-    res.json({ ok: true, message: `\u6253\u5370\u5DF2\u53D1\u9001\uFF1A${result.printerName}`, printerName: result.printerName, order: toPublicOrder(order) });
+    res.json({ ok: true, message: `\u6253\u5370\u5DF2\u53D1\u9001\uFF1A${result.printerName}`, printerName: result.printerName, order: toPublicOrder(updatedOrder) });
   } catch (error) { console.error(error); res.status(500).json({ message: process.env.NODE_ENV === "production" ? `\u6253\u5370\u5931\u8D25` : `\u6253\u5370\u5931\u8D25\uFF1A${error.message}`, order: toPublicOrder(order) }); }
 });
 
@@ -523,8 +526,10 @@ app.post("/api/orders/:id/print-ticket", requireCustomerAccess, async (req, res)
   if (!canAccessCustomerOrder(req, order)) { return res.status(403).json({ message: "Order access denied" }); }
   try {
     const result = await printOrderTicket(order, String(req.body?.printerName ?? ""));
+    db.prepare("UPDATE orders SET print_status = 'printed' WHERE id = ? AND deleted_at IS NULL").run(order.id);
+    const updatedOrder = getOrderById(req.params.id, { includeDeleted: false, user });
     writeAuditLog(req, "orders.print_ticket", "order", order.id, { orderNo: order.order_no, printerName: result.printerName });
-    res.json({ ok: true, message: `\u6253\u5370\u5DF2\u53D1\u9001\uFF1A${result.printerName}`, printerName: result.printerName, order: toPublicOrder(order) });
+    res.json({ ok: true, message: `\u6253\u5370\u5DF2\u53D1\u9001\uFF1A${result.printerName}`, printerName: result.printerName, order: toPublicOrder(updatedOrder) });
   } catch (error) { console.error(error); res.status(500).json({ message: process.env.NODE_ENV === "production" ? `\u6253\u5370\u5931\u8D25` : `\u6253\u5370\u5931\u8D25\uFF1A${error.message}`, order: toPublicOrder(order) }); }
 });
 

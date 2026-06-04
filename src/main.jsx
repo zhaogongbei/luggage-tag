@@ -21,7 +21,6 @@ function App() {
   const impositionPrintMatch = pathname === "/print-layout" || pathname === "/print-a4";
   const creatorMode = pathname === "/creator";
   const adminMode = pathname.startsWith("/admin");
-  const creatorParams = new URLSearchParams(window.location.search);
   const [page, setPage] = useState(adminMode ? "admin" : "customer");
   const [access, setAccess] = useState(null);
   const [settings, setSettings] = useState({
@@ -142,13 +141,6 @@ function App() {
   const activePage = customerDisabled && page === "customer" ? "admin" : page;
   const showStaffNavigation = Boolean(access?.authenticated);
   const showLogout = Boolean(access?.sessionAuthenticated || access?.authenticated || access?.invited);
-  const autoPrint = creatorParams.has("autoPrint")
-    ? parseBooleanParam(creatorParams.get("autoPrint"))
-    : Boolean(settings.creatorAutoPrint) || parseBooleanParam(import.meta.env.VITE_CREATOR_AUTO_PRINT);
-  const autoReturn = creatorParams.has("autoReturn")
-    ? parseBooleanParam(creatorParams.get("autoReturn"))
-    : Boolean(settings.creatorAutoReturn) || parseBooleanParam(import.meta.env.VITE_CREATOR_AUTO_RETURN);
-
   if (creatorMode) {
     return (
       <div className="app-shell creator-shell">
@@ -159,7 +151,7 @@ function App() {
           )}
         </header>
         {loadError && <p className="message app-message">{loadError}</p>}
-        <CustomerPage autoPrint={autoPrint} autoReturn={autoReturn} onCreated={loadState} previewNumber={previewNumber} settings={settings} />
+        <CustomerPage onCreated={loadState} previewNumber={previewNumber} settings={settings} />
       </div>
     );
   }
@@ -172,7 +164,7 @@ function App() {
             <div className="creator-brand"><BrandLogo className="brand-mark" /></div>
             <button className="creator-logout" onClick={logout} type="button"><LogOut size={24} />退出</button>
           </header>
-          <CustomerPage autoPrint={autoPrint} autoReturn={autoReturn} onCreated={loadState} previewNumber={previewNumber} settings={settings} />
+          <CustomerPage onCreated={loadState} previewNumber={previewNumber} settings={settings} />
         </div>
       );
     }
@@ -219,7 +211,7 @@ function App() {
         </nav>
       </header>
       {loadError && <p className="message app-message">{loadError}</p>}
-      <CustomerPage autoPrint={autoPrint} autoReturn={autoReturn} onCreated={loadState} previewNumber={previewNumber} settings={settings} />
+      <CustomerPage onCreated={loadState} previewNumber={previewNumber} settings={settings} />
     </div>
   );
 }

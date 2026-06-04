@@ -69,6 +69,10 @@ async function createOrderFromPayload(req) {
     );
   } catch (error) {
     db.prepare("DELETE FROM orders WHERE id = ?").run(created.id);
+    await Promise.allSettled([
+      fs.unlink(resolveStoredFilePath(created.pngPath)),
+      fs.unlink(resolveStoredFilePath(created.pdfPath))
+    ]);
     throw error;
   }
   writeAuditLog(req, "orders.create", "order", created.id, { orderNo: created.orderNo, customerText, templateId });

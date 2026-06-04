@@ -57,8 +57,12 @@ async function resolvePrinterName(requestedPrinterName = "") {
   const settings = await getSettings();
   const configuredPrinter = String(requestedPrinterName || settings.selectedPrinter || "").trim();
   if (configuredPrinter) {
-    if (printers.length && !printers.some((p) => p.name === configuredPrinter)) {
+    const configuredPrinterInfo = printers.find((p) => p.name === configuredPrinter);
+    if (printers.length && !configuredPrinterInfo) {
       throw new Error(`\u672A\u627E\u5230\u6253\u5370\u673A\uFF1A${configuredPrinter}`);
+    }
+    if (configuredPrinterInfo?.isVirtual || isVirtualPrinterName(configuredPrinter)) {
+      throw new Error(`\u6253\u5370\u673A\u662F\u865A\u62DF\u8BBE\u5907\uFF0C\u4E0D\u4F1A\u51FA\u7EB8\uFF1A${configuredPrinter}\u3002\u8BF7\u5230\u540E\u53F0\u9009\u62E9\u5B9E\u4F53\u6253\u5370\u673A`);
     }
     return configuredPrinter;
   }

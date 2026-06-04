@@ -504,8 +504,6 @@ export function AdminPage({ settings, onSettingsSaved, access, onGoCustomer, onL
           <label className="field"><span>当前编号</span><input min="1" type="number" value={form.currentNumber ?? 1} onChange={(e) => setForm({ ...form, currentNumber: Number(e.target.value) })} /></label>
           <label className="field"><span>编号位数</span><input min="1" max="8" type="number" value={form.digits ?? 4} onChange={(e) => setForm({ ...form, digits: Number(e.target.value) })} /></label>
           <label className="toggle"><input checked={Boolean(form.watermarkEnabled)} onChange={(e) => setForm({ ...form, watermarkEnabled: e.target.checked })} type="checkbox" /><span>开启时间水印</span></label>
-          <label className="toggle"><input checked={Boolean(form.creatorAutoPrint)} onChange={(e) => setForm({ ...form, creatorAutoPrint: e.target.checked })} type="checkbox" /><span>/creator 自动打印</span></label>
-          <label className="toggle"><input checked={Boolean(form.creatorAutoReturn)} onChange={(e) => setForm({ ...form, creatorAutoReturn: e.target.checked })} type="checkbox" /><span>/creator 自动返回</span></label>
           <label className="field"><span>系统版本</span><input readOnly value={APP_VERSION} /></label>
         </div>
         <button className="secondary-btn" onClick={saveSettings} type="button"><CheckCircle2 size={18} />保存设置</button>

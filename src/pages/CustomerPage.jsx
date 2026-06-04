@@ -4,9 +4,8 @@ import { apiFetch } from "../lib/api";
 import { templates } from "../lib/constants";
 import { normalizeCustomerName, finalizeCustomerName, isValidCustomerName } from "../lib/validate";
 import { CanvasPreview } from "../components/CanvasPreview";
-import EscPos from "../plugins/escpos";
 
-export function CustomerPage({ settings, previewNumber, onCreated, autoPrint = false }) {
+export function CustomerPage({ settings, previewNumber, onCreated }) {
   const [templateId, setTemplateId] = useState("template_01");
   const [customerText, setCustomerText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -70,6 +69,9 @@ export function CustomerPage({ settings, previewNumber, onCreated, autoPrint = f
   }
 
   async function printOrder() {
+    if (busy) {
+      return;
+    }
     if (!isValidCustomerName(finalName)) {
       setMessage("请输入 1-12 位英文大写字母，可包含空格");
       setMessageType("error");
@@ -80,56 +82,24 @@ export function CustomerPage({ settings, previewNumber, onCreated, autoPrint = f
     setMessage("");
     try {
       const pngDataUrl = canvasRef.current.toDataURL("image/png");
-
-      // 1. 创建订单（不打印，只取号和存记录）
-      const response = await apiFetch("/api/orders", {
+      const response = await apiFetch("/api/orders/direct-print", {
         method: "POST",
         body: JSON.stringify({ templateId, customerText: finalName, pngDataUrl })
       });
       const data = await response.json();
       if (!response.ok) {
-        throw new Error(data.message || "订单创建失败");
+        throw new Error(data.message || "打印失败，订单已保存后可在后台重打");
       }
 
-      // 2. 打印（按环境选择路径）
-      const isCapacitorNative = typeof window !== 'undefined' && window.Capacitor?.isNativePlatform?.() && window.Capacitor?.getPlatform?.() !== 'electron';
-      if (isCapacitorNative) {
-        // App 内 → 原生 USB ESC/POS
-        try {
-          await EscPos.print({
-            customerText: finalName,
-            orderNo: data.orderNo,
-            timestamp: new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })
-          });
-        } catch {
-          // USB 失败 → 回退到当前窗口打印页（避免 window.open 被弹窗拦截）
-          window.location.href = `/ticket/${data.id}?autoPrint=1`;
-          return;
-        }
-      } else if (autoPrint) {
-        // Kiosk 模式 → 使用已创建的订单 ID 进行打印（不再重复创建订单）
-        const printResponse = await apiFetch(`/api/orders/${data.id}/print`, {
-          method: "POST"
-        });
-        if (!printResponse.ok) {
-          const printData = await printResponse.json();
-          throw new Error(printData.message || "打印失败");
-        }
-      } else {
-        // 普通浏览器 → 避免 window.open 被弹窗拦截，改用 location.href
-        window.location.href = `/ticket/${data.id}?autoPrint=1`;
-        return;
-      }
-
-      setMessage(`✓ 打印成功\n编号：${data.orderNo}`);
+      setMessage(`打印成功\n编号：${data.orderNo}`);
       setMessageType("success");
-      onCreated();
+      Promise.resolve(onCreated?.()).catch(() => {});
       window.setTimeout(() => {
         setCustomerText("");
         setTemplateId("template_01");
         setMessage("");
         inputRef.current?.focus();
-      }, 2000);
+      }, 1200);
     } catch (error) {
       setMessage(error.message);
       setMessageType("error");
