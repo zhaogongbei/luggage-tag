@@ -1,0 +1,7 @@
+{"path":"src/main.jsx","reason":"Added staff-only backend link to local creator page topbar"}
+{"path":"src/styles.css","reason":"Added creator topbar action layout and shared button/link styling"}
+{"path":"src/lib/constants.js","reason":"Updated displayed app version to V1.4.43"}
+{"path":"package.json","reason":"Updated app version to 1.4.43"}
+{"path":"electron/package.json","reason":"Updated desktop package version to 1.4.43"}
+{"path":"README.md","reason":"Recorded V1.4.43 local desktop admin entry change"}
+{"path":"TEST_CASES.md","reason":"Added desktop admin entry acceptance case"}

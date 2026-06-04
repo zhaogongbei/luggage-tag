@@ -1,0 +1,12 @@
+{
+  "id": "add-local-desktop-admin-access",
+  "title": "为本地端应用补充后台入口",
+  "status": "completed",
+  "complexity": "S",
+  "risk": "medium",
+  "domain": "desktop-ui",
+  "currentPhase": "completed",
+  "nextAction": "归档任务并提交",
+  "createdAt": "2026-06-04T03:52:19Z",
+  "branch": "master"
+}
