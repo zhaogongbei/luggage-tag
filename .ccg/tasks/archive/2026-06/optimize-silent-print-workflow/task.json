@@ -1,0 +1,12 @@
+{
+  "id": "optimize-silent-print-workflow",
+  "title": "优化 DIY 行李牌现场定制打印系统并记录版本号",
+  "status": "completed",
+  "complexity": "L+",
+  "risk": "high",
+  "domain": "fullstack",
+  "currentPhase": "completed",
+  "nextAction": "归档任务",
+  "createdAt": "2026-06-04T02:14:41Z",
+  "branch": "master"
+}

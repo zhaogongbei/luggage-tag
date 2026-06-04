@@ -1,0 +1,11 @@
+{"path":"src/pages/CustomerPage.jsx","reason":"customer one-click silent print path"}
+{"path":"server/index.js","reason":"direct-print and reprint route behavior"}
+{"path":"server/orders.js","reason":"order creation and file generation failure cleanup"}
+{"path":"server/printing.js","reason":"printer resolution and virtual-printer rejection"}
+{"path":"src/main.jsx","reason":"removed stale customer print props"}
+{"path":"src/pages/AdminPage.jsx","reason":"removed stale creator auto print settings"}
+{"path":"src/lib/constants.js","reason":"version display"}
+{"path":"README.md","reason":"version and silent print documentation"}
+{"path":"TEST_CASES.md","reason":"manual acceptance tests"}
+{"path":"package.json","reason":"version"}
+{"path":"package-lock.json","reason":"version"}
