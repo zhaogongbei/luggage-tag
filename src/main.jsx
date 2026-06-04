@@ -146,8 +146,15 @@ function App() {
       <div className="app-shell creator-shell">
         <header className="creator-topbar">
           <div className="creator-brand"><BrandLogo className="brand-mark" /></div>
-          {showLogout && (
-            <button className="creator-logout" onClick={logout} type="button"><LogOut size={24} />退出</button>
+          {(showStaffNavigation || showLogout) && (
+            <div className="creator-topbar-actions">
+              {showStaffNavigation && (
+                <a className="creator-admin-link" href="/admin"><Settings size={24} />后台</a>
+              )}
+              {showLogout && (
+                <button className="creator-logout" onClick={logout} type="button"><LogOut size={24} />退出</button>
+              )}
+            </div>
           )}
         </header>
         {loadError && <p className="message app-message">{loadError}</p>}
@@ -162,7 +169,9 @@ function App() {
         <div className="app-shell creator-shell">
           <header className="creator-topbar">
             <div className="creator-brand"><BrandLogo className="brand-mark" /></div>
-            <button className="creator-logout" onClick={logout} type="button"><LogOut size={24} />退出</button>
+            <div className="creator-topbar-actions">
+              <button className="creator-logout" onClick={logout} type="button"><LogOut size={24} />退出</button>
+            </div>
           </header>
           <CustomerPage onCreated={loadState} previewNumber={previewNumber} settings={settings} />
         </div>

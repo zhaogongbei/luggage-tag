@@ -415,7 +415,16 @@ input[type="checkbox"] {
   margin-top: 8px;
 }
 
-.creator-logout {
+.creator-topbar-actions {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  position: absolute;
+  right: clamp(24px, 5vw, 72px);
+}
+
+.creator-logout,
+.creator-admin-link {
   align-items: center;
   background: rgba(255, 255, 255, 0.82);
   border: 1px solid rgba(22, 32, 29, 0.1);
@@ -425,8 +434,7 @@ input[type="checkbox"] {
   font-size: 18px;
   gap: 10px;
   padding: 15px 22px;
-  position: absolute;
-  right: clamp(24px, 5vw, 72px);
+  text-decoration: none;
 }
 
 .creator-topbar nav {
