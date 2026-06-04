@@ -1,0 +1,12 @@
+{
+  "id": "package-local-app-and-fix-browser-print",
+  "title": "打包本地端应用并修复浏览器打印功能",
+  "status": "completed",
+  "complexity": "L+",
+  "risk": "high",
+  "domain": "desktop-printing",
+  "currentPhase": "completed",
+  "nextAction": "归档任务并提交",
+  "createdAt": "2026-06-04T03:04:29Z",
+  "branch": "master"
+}

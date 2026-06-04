@@ -1,0 +1,11 @@
+{"path":"electron/src/local-backend.ts","reason":"Electron 本地后端进程启动、端口选择、健康检查、退出清理"}
+{"path":"electron/src/index.ts","reason":"Electron 初始化顺序、启动本地后端后加载 /creator、错误页转义"}
+{"path":"electron/src/setup.ts","reason":"BrowserWindow 安全配置和导航限制"}
+{"path":"electron/electron-builder.config.json","reason":"本地服务 extraResources 打包配置"}
+{"path":"scripts/prepare-desktop.mjs","reason":"桌面端构建前资源同步和生产依赖安装"}
+{"path":"src/pages/CustomerPage.jsx","reason":"本地端静默打印与浏览器订单打印分流"}
+{"path":"src/pages/CustomerTicketPrintPage.jsx","reason":"浏览器小票打印页 autoPrint 参数和手动打印"}
+{"path":"src/pages/PrintPage.jsx","reason":"后台单张打印页 autoPrint 参数"}
+{"path":"src/pages/ImpositionPrintPage.jsx","reason":"拼版打印页 autoPrint 参数"}
+{"path":"README.md","reason":"版本、桌面端、浏览器打印差异说明"}
+{"path":"TEST_CASES.md","reason":"新增浏览器打印回退验收用例"}
