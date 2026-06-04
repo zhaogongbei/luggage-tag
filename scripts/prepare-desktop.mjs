@@ -7,6 +7,7 @@ const __filename = fileURLToPath(import.meta.url);
 const rootDir = path.resolve(path.dirname(__filename), "..");
 const electronDir = path.join(rootDir, "electron");
 const localServerDir = path.join(electronDir, "local-server");
+const runtimeDir = path.join(localServerDir, "runtime");
 const npmCmd = "npm";
 
 async function copyIfExists(source, target) {
@@ -28,6 +29,13 @@ function run(command, args, options = {}) {
   });
 }
 
+async function copyNodeRuntime() {
+  const nodeBinaryName = process.platform === "win32" ? "node.exe" : "node";
+  const bundledNodePath = path.join(runtimeDir, nodeBinaryName);
+  await fs.mkdir(runtimeDir, { recursive: true });
+  await fs.copyFile(process.execPath, bundledNodePath);
+}
+
 await fs.rm(localServerDir, { force: true, recursive: true });
 await fs.mkdir(localServerDir, { recursive: true });
 
@@ -40,3 +48,4 @@ await fs.copyFile(path.join(rootDir, "package.json"), path.join(localServerDir, 
 await fs.copyFile(path.join(rootDir, "package-lock.json"), path.join(localServerDir, "package-lock.json"));
 
 run(npmCmd, ["install", "--omit=dev", "--ignore-scripts", "--legacy-peer-deps"], { cwd: localServerDir });
+await copyNodeRuntime();

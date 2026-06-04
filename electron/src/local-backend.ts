@@ -28,16 +28,23 @@ function compareNodeVersion(versionText: string): boolean {
   return major === MIN_NODE_MAJOR && minor >= MIN_NODE_MINOR;
 }
 
-function resolveNodeCommand(): string {
-  const command = process.env.LUGGAGE_TAG_NODE_PATH || 'node';
-  const result = spawnSync(command, ['--version'], { encoding: 'utf8', windowsHide: true });
-  const versionText = String(result.stdout || result.stderr || '').trim();
-  if (result.error || !compareNodeVersion(versionText)) {
-    throw new Error(
-      `本地打印端需要 Node.js >= ${MIN_NODE_MAJOR}.${MIN_NODE_MINOR}.0。当前检测结果：${versionText || result.error?.message || '未找到 node'}`
-    );
+function resolveNodeCommand(serverRoot: string): string {
+  const bundledNode = join(serverRoot, 'runtime', process.platform === 'win32' ? 'node.exe' : 'node');
+  const candidates = [process.env.LUGGAGE_TAG_NODE_PATH, existsSync(bundledNode) ? bundledNode : '', 'node'].filter(
+    (candidate): candidate is string => Boolean(candidate)
+  );
+  let lastResult = '未找到 node';
+
+  for (const command of candidates) {
+    const result = spawnSync(command, ['--version'], { encoding: 'utf8', windowsHide: true });
+    const versionText = String(result.stdout || result.stderr || '').trim();
+    lastResult = versionText || result.error?.message || lastResult;
+    if (!result.error && compareNodeVersion(versionText)) {
+      return command;
+    }
   }
-  return command;
+
+  throw new Error(`本地打印端需要 Node.js >= ${MIN_NODE_MAJOR}.${MIN_NODE_MINOR}.0。当前检测结果：${lastResult}`);
 }
 
 function hasServerEntry(dir: string): boolean {
@@ -105,8 +112,8 @@ export async function startLocalBackend(): Promise<string> {
   if (runtime) {
     return runtime.url;
   }
-  const nodeCommand = resolveNodeCommand();
   const serverRoot = resolveServerRoot();
+  const nodeCommand = resolveNodeCommand(serverRoot);
   const port = await choosePort();
   const url = `http://127.0.0.1:${port}`;
   const child = spawn(nodeCommand, [join(serverRoot, 'server', 'index.js')], {
