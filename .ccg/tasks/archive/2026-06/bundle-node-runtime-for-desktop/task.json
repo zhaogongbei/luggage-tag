@@ -1,0 +1,12 @@
+{
+  "id": "bundle-node-runtime-for-desktop",
+  "status": "completed",
+  "title": "桌面端打包内置 Node 运行时",
+  "domain": "desktop",
+  "createdAt": "2026-06-04T10:19:38Z",
+  "nextAction": "归档任务并提交推送",
+  "branch": "master",
+  "risk": "medium",
+  "currentPhase": "completed",
+  "complexity": "M"
+}
