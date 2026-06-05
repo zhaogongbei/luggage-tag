@@ -1,0 +1,12 @@
+{
+  "id": "add-ticket-layout-settings",
+  "title": "后台可调热敏小票尺寸和边距",
+  "status": "completed",
+  "complexity": "M",
+  "risk": "medium",
+  "domain": "frontend",
+  "currentPhase": "completed",
+  "nextAction": "已归档",
+  "createdAt": "2026-06-05T00:00:00+08:00",
+  "branch": "master"
+}
