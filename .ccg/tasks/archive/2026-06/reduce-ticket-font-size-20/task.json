@@ -1,0 +1,12 @@
+{
+  "id": "reduce-ticket-font-size-20",
+  "title": "热敏小票字体整体缩小 20%",
+  "status": "completed",
+  "complexity": "S",
+  "risk": "low",
+  "domain": "frontend",
+  "currentPhase": "completed",
+  "nextAction": "已归档",
+  "createdAt": "2026-06-05T00:00:00+08:00",
+  "branch": "master"
+}
