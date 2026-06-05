@@ -8,8 +8,13 @@ import {
 } from "./config.js";
 
 function getRequestIp(req) {
+  // 信任反代时，取 X-Forwarded-For 链「最右」IP：标准反代（如 nginx 的
+  // $proxy_add_x_forwarded_for）会把它直连看到的真实客户端 IP 追加到链尾，
+  // 客户端伪造的值只能停留在左侧，无法影响最右值，从而避免伪造 IP 绕过
+  // 登录失败锁定与速率限制。注意：此实现假设仅一层可信反代。
   if (trustProxy && req.headers["x-forwarded-for"]) {
-    return String(req.headers["x-forwarded-for"]).split(",")[0].trim();
+    const chain = String(req.headers["x-forwarded-for"]).split(",").map((s) => s.trim()).filter(Boolean);
+    if (chain.length) { return chain[chain.length - 1]; }
   }
   return String(req.socket.remoteAddress ?? "unknown").split(",")[0].trim();
 }

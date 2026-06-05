@@ -7,7 +7,7 @@ import helmet from "helmet";
 import {
   rootDir, port, host, allowedOrigins,
   sessionCookieName, inviteCookieName, sessionTtlMs, inviteTtlMs, loginMaxFailures, loginLockMs,
-  deploymentModes, defaultLayoutOptions, resolveStoredFilePath,
+  deploymentModes, defaultLayoutOptions, resolveStoredFilePath, templateIds,
   allowDefaultPasswordOnPublicHost, normalizeTicketPrintLayout
 } from "./config.js";
 
@@ -64,8 +64,8 @@ function isAllowedOrigin(origin, req) {
   return false;
 }
 
-function isPublicHostBinding() {
-  return ["0.0.0.0", "::", "[::]"].includes(String(host).toLowerCase());
+function isLocalHostBinding() {
+  return ["127.0.0.1", "localhost", "::1"].includes(String(host).toLowerCase());
 }
 
 function saveSetting(key, value) {
@@ -373,9 +373,26 @@ app.get("/api/orders", requireRole(["super_admin", "admin", "client"]), async (r
   const page = Math.max(1, Number(req.query.page) || 1);
   const pageSize = Math.min(200, Math.max(1, Number(req.query.pageSize) || 50));
   const offset = (page - 1) * pageSize;
-  const params = user.role === "client" ? [user.id] : [];
-  const rows = db.prepare(`SELECT orders.*, events.name AS event_name, events.event_date AS event_date, users.username AS creator_username FROM orders LEFT JOIN events ON events.id = orders.event_id LEFT JOIN users ON users.id = orders.created_by WHERE ${includeDeleted ? "orders.deleted_at IS NOT NULL" : "orders.deleted_at IS NULL"} ${ownershipClause} ORDER BY orders.id DESC LIMIT ? OFFSET ?`).all(...params, pageSize, offset);
-  const total = db.prepare(`SELECT COUNT(*) AS count FROM orders WHERE ${includeDeleted ? "deleted_at IS NOT NULL" : "deleted_at IS NULL"} ${ownershipClause}`).get(...params);
+  const ownershipParams = user.role === "client" ? [user.id] : [];
+
+  // 服务端搜索/筛选（修复跨页搜索：此前仅在前端对当前页做过滤，跨页失效）
+  const search = String(req.query.search ?? "").trim().slice(0, 64);
+  const statusFilter = req.query.status === "printed" ? "printed" : req.query.status === "pending" ? "pending" : "";
+  const templateFilter = templateIds.includes(req.query.template) ? String(req.query.template) : "";
+  let filterClause = "";
+  const filterParams = [];
+  if (search) {
+    filterClause += " AND (UPPER(orders.order_no) LIKE ? OR UPPER(orders.customer_text) LIKE ?)";
+    const like = `%${search.toUpperCase()}%`;
+    filterParams.push(like, like);
+  }
+  if (statusFilter === "printed") { filterClause += " AND orders.print_status = 'printed'"; }
+  else if (statusFilter === "pending") { filterClause += " AND orders.print_status != 'printed'"; }
+  if (templateFilter) { filterClause += " AND orders.template_id = ?"; filterParams.push(templateFilter); }
+
+  const baseWhere = includeDeleted ? "orders.deleted_at IS NOT NULL" : "orders.deleted_at IS NULL";
+  const rows = db.prepare(`SELECT orders.*, events.name AS event_name, events.event_date AS event_date, users.username AS creator_username FROM orders LEFT JOIN events ON events.id = orders.event_id LEFT JOIN users ON users.id = orders.created_by WHERE ${baseWhere} ${ownershipClause} ${filterClause} ORDER BY orders.id DESC LIMIT ? OFFSET ?`).all(...ownershipParams, ...filterParams, pageSize, offset);
+  const total = db.prepare(`SELECT COUNT(*) AS count FROM orders WHERE ${baseWhere} ${ownershipClause} ${filterClause}`).get(...ownershipParams, ...filterParams);
   res.json({ orders: rows.map(toPublicOrder), page, pageSize, total: Number(total?.count ?? 0) });
 });
 
@@ -605,8 +622,8 @@ app.use((err, _req, res, _next) => {
   res.status(500).json({ message: "Internal server error" });
 });
 
-if (usingDefaultPassword && isPublicHostBinding() && !allowDefaultPasswordOnPublicHost) {
-  throw new Error("Refusing to start with the default staff password on a public host binding. Set LUGGAGE_TAG_STAFF_PASSWORD or bind to 127.0.0.1.");
+if (usingDefaultPassword && !isLocalHostBinding() && !allowDefaultPasswordOnPublicHost) {
+  throw new Error("Refusing to start with the default staff password on a non-localhost (LAN/public) binding. Set SUPER_ADMIN_PASSWORD/LUGGAGE_TAG_STAFF_PASSWORD, or bind to 127.0.0.1, or set LUGGAGE_TAG_ALLOW_DEFAULT_PASSWORD_ON_PUBLIC_HOST=true to override.");
 }
 
 app.listen(port, host, () => {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Component, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Home, LogOut, Settings } from "lucide-react";
 import "./styles.css";
@@ -226,4 +226,38 @@ function App() {
   );
 }
 
-createRoot(document.getElementById("root")).render(<App />);
+class ErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error, info) {
+    console.error("UI crashed:", error, info);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <main className="access-page">
+          <section className="panel access-panel">
+            <div className="section-title"><span>页面出错了</span></div>
+            <p className="message">{String(this.state.error?.message ?? "发生未知错误，请重新加载页面")}</p>
+            <button className="primary-btn" type="button" onClick={() => window.location.reload()}>重新加载</button>
+          </section>
+        </main>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+createRoot(document.getElementById("root")).render(
+  <ErrorBoundary>
+    <App />
+  </ErrorBoundary>
+);

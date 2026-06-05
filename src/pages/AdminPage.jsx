@@ -121,12 +121,15 @@ export function AdminPage({ settings, onSettingsSaved, access, onGoCustomer, onL
     } catch { /* ignore */ }
   }
 
-  async function loadOrders() {
+  async function loadOrders(pageOverride) {
     try {
       const params = new URLSearchParams();
       if (showDeletedOrders) params.set("deleted", "true");
-      params.set("page", String(orderPage));
+      params.set("page", String(pageOverride ?? orderPage));
       params.set("pageSize", String(ORDER_PAGE_SIZE));
+      if (orderSearch.trim()) params.set("search", orderSearch.trim());
+      if (orderStatusFilter !== "all") params.set("status", orderStatusFilter);
+      if (orderTemplateFilter !== "all") params.set("template", orderTemplateFilter);
       const response = await apiFetch(`/api/orders?${params.toString()}`);
       const data = await response.json();
       if (!response.ok) {
@@ -185,11 +188,6 @@ export function AdminPage({ settings, onSettingsSaved, access, onGoCustomer, onL
     loadOrderStats();
     if (canUseAdminTools) loadPrinters();
   }, []);
-
-  useEffect(() => {
-    if (!orders.length && !showDeletedOrders) return;
-    loadOrders();
-  }, [showDeletedOrders]);
 
   const isInitialPageMount = useRef(true);
   useEffect(() => {
@@ -325,9 +323,14 @@ export function AdminPage({ settings, onSettingsSaved, access, onGoCustomer, onL
   const orderTotalPages = Math.max(1, Math.ceil(orderTotal / ORDER_PAGE_SIZE));
 
   /* eslint-disable react-hooks/exhaustive-deps */
+  const isInitialFilterMount = useRef(true);
   useEffect(() => {
-    setOrderPage(1);
-    if (!isInitialPageMount.current) { loadOrders(); }
+    if (isInitialFilterMount.current) { isInitialFilterMount.current = false; return; }
+    const timer = setTimeout(() => {
+      setOrderPage(1);
+      loadOrders(1);
+    }, 300);
+    return () => clearTimeout(timer);
   }, [showDeletedOrders, orderSearch, orderStatusFilter, orderTemplateFilter]);
   /* eslint-enable react-hooks/exhaustive-deps */
 
