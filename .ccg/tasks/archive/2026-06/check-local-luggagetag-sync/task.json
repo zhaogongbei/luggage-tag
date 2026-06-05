@@ -1,0 +1,12 @@
+{
+  "id": "check-local-luggagetag-sync",
+  "title": "检查本地 LuggageTag 应用是否同步排版改动",
+  "status": "completed",
+  "complexity": "S",
+  "risk": "low",
+  "domain": "ops",
+  "currentPhase": "completed",
+  "nextAction": "已确认桌面打包资源未同步",
+  "createdAt": "2026-06-05T00:00:00+08:00",
+  "branch": "master"
+}
