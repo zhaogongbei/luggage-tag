@@ -14,6 +14,7 @@ export function TicketPrint({ order, layout }) {
     "--ticket-time-font-size": `${printLayout.timeFontSize}pt`,
     "--ticket-name-margin-bottom": `${printLayout.nameMarginBottomMm}mm`,
     "--ticket-serial-margin-bottom": `${printLayout.serialMarginBottomMm}mm`,
+    "--ticket-time-margin-bottom": `${printLayout.timeMarginBottomMm}mm`,
     "--ticket-content-align": contentAlign,
   };
 

@@ -1761,6 +1761,7 @@ tbody tr:hover {
   --ticket-serial-font-size: 16pt;
   --ticket-serial-margin-bottom: 4mm;
   --ticket-time-font-size: 9.6pt;
+  --ticket-time-margin-bottom: 3mm;
   --ticket-top-offset: 0mm;
   --ticket-width: 80mm;
   align-items: var(--ticket-align-items);
@@ -1806,6 +1807,7 @@ tbody tr:hover {
   font-size: var(--ticket-time-font-size);
   font-weight: 400;
   line-height: 1;
+  margin-bottom: var(--ticket-time-margin-bottom);
 }
 
 .imposition-print-shell {

@@ -565,6 +565,7 @@ export function AdminPage({ settings, onSettingsSaved, access, onGoCustomer, onL
           <label className="field"><span>时间字号 pt</span><input min="4" max="48" step="0.1" type="number" value={ticketLayout.timeFontSize} onChange={(e) => updateTicketLayoutOption("timeFontSize", e.target.value)} /></label>
           <label className="field"><span>姓名下边距 mm</span><input min="0" max="50" step="0.1" type="number" value={ticketLayout.nameMarginBottomMm} onChange={(e) => updateTicketLayoutOption("nameMarginBottomMm", e.target.value)} /></label>
           <label className="field"><span>编号下边距 mm</span><input min="0" max="50" step="0.1" type="number" value={ticketLayout.serialMarginBottomMm} onChange={(e) => updateTicketLayoutOption("serialMarginBottomMm", e.target.value)} /></label>
+          <label className="field"><span>时间下边距 mm</span><input min="0" max="50" step="0.1" type="number" value={ticketLayout.timeMarginBottomMm} onChange={(e) => updateTicketLayoutOption("timeMarginBottomMm", e.target.value)} /></label>
           <div className="mode-help">整体偏移填负数会上移，填正数会下移；保存后浏览器打印、PDF 和直连打印使用同一参数。</div>
         </div>
         <button className="secondary-btn" onClick={saveSettings} type="button"><CheckCircle2 size={18} />保存小票排版</button>

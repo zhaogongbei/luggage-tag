@@ -135,7 +135,7 @@ $document.add_PrintPage({
   try {
     $graphics.DrawString($customerText, $nameFont, [System.Drawing.Brushes]::Black, (New-Object System.Drawing.RectangleF($textRectX, $topY, $textRectWidthMm, ($nameHeight + 1))), $centerFormat)
     $graphics.DrawString($orderNo, $noFont, [System.Drawing.Brushes]::Black, (New-Object System.Drawing.RectangleF($textRectX, ($topY + $nameHeight + ${printLayout.nameMarginBottomMm}), $textRectWidthMm, ($serialHeight + 1))), $centerFormat)
-    $graphics.DrawString($generatedAt, $timeFont, [System.Drawing.Brushes]::Black, (New-Object System.Drawing.RectangleF($textRectX, ($topY + $nameHeight + ${printLayout.nameMarginBottomMm} + $serialHeight + ${printLayout.serialMarginBottomMm}), $textRectWidthMm, ($timeHeight + 1))), $centerFormat)
+    $graphics.DrawString($generatedAt, $timeFont, [System.Drawing.Brushes]::Black, (New-Object System.Drawing.RectangleF($textRectX, ($topY + $nameHeight + ${printLayout.nameMarginBottomMm} + $serialHeight + ${printLayout.serialMarginBottomMm} + $timeHeight + ${printLayout.timeMarginBottomMm}), $textRectWidthMm, ($timeHeight + 1))), $centerFormat)
   } finally {
     $nameFont.Dispose()
     $noFont.Dispose()

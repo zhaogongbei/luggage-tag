@@ -73,6 +73,7 @@ const ticketPrintLayout = {
   timeFontSize: readLayoutNumber("LUGGAGE_TAG_TICKET_TIME_FONT_SIZE", 9.6, 4, 48),
   nameMarginBottomMm: 5,
   serialMarginBottomMm: 4,
+  timeMarginBottomMm: 3,
   contentAlign: normalizeTicketContentAlign(process.env.LUGGAGE_TAG_TICKET_CONTENT_ALIGN ?? process.env.ticket_content_align, "center")
 };
 
@@ -87,6 +88,7 @@ function normalizeTicketPrintLayout(value = {}, fallback = ticketPrintLayout) {
     timeFontSize: parseLayoutNumber(value.timeFontSize ?? value.ticketTimeFontSize, fallback.timeFontSize, 4, 48),
     nameMarginBottomMm: parseLayoutNumber(value.nameMarginBottomMm ?? value.ticketNameMarginBottomMm, fallback.nameMarginBottomMm, 0, 50),
     serialMarginBottomMm: parseLayoutNumber(value.serialMarginBottomMm ?? value.ticketSerialMarginBottomMm, fallback.serialMarginBottomMm, 0, 50),
+    timeMarginBottomMm: parseLayoutNumber(value.timeMarginBottomMm ?? value.ticketTimeMarginBottomMm, fallback.timeMarginBottomMm, 0, 50),
     contentAlign: normalizeTicketContentAlign(value.contentAlign ?? value.ticketContentAlign ?? value.textAlign ?? value.ticketTextAlign, fallback.contentAlign)
   };
 }
@@ -110,6 +112,7 @@ const defaultSettings = {
   ticketTimeFontSize: String(ticketPrintLayout.timeFontSize),
   ticketNameMarginBottomMm: String(ticketPrintLayout.nameMarginBottomMm),
   ticketSerialMarginBottomMm: String(ticketPrintLayout.serialMarginBottomMm),
+  ticketTimeMarginBottomMm: String(ticketPrintLayout.timeMarginBottomMm),
   ticketContentAlign: ticketPrintLayout.contentAlign
 };
 const deploymentModes = ["private", "invite", "public", "maintenance"];

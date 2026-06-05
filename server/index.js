@@ -335,6 +335,7 @@ app.put("/api/settings", requireRole(["super_admin"]), async (req, res) => {
   saveSetting("ticketTimeFontSize", ticketLayout.timeFontSize);
   saveSetting("ticketNameMarginBottomMm", ticketLayout.nameMarginBottomMm);
   saveSetting("ticketSerialMarginBottomMm", ticketLayout.serialMarginBottomMm);
+  saveSetting("ticketTimeMarginBottomMm", ticketLayout.timeMarginBottomMm);
   saveSetting("ticketContentAlign", ticketLayout.contentAlign);
   writeAuditLog(req, "settings.update", "settings", "system", { deploymentMode, creatorAutoPrint, creatorAutoReturn, ticketPrintLayout: ticketLayout });
   res.json(await getSettings());

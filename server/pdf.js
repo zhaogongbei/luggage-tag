@@ -15,7 +15,7 @@ function getTicketDrawLayout(width, height, printLayout = ticketPrintLayout) {
   const nameY = topOffset;
   const serialY = nameY + ptToMm(nameFontSize) + printLayout.nameMarginBottomMm * scale;
   const timeY = serialY + ptToMm(serialFontSize) + printLayout.serialMarginBottomMm * scale;
-  return { nameFontSize, serialFontSize, timeFontSize, nameY, serialY, timeY };
+  return { nameFontSize, serialFontSize, timeFontSize, nameY, serialY, timeY, timeMarginBottom: printLayout.timeMarginBottomMm }; 
 }
 
 function getTicketTextAnchor(x, width, printLayout = ticketPrintLayout) {
