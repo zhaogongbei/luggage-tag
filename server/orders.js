@@ -4,7 +4,7 @@ import { db } from "./db.js";
 import {
   templateIds, getExportRelativePath, resolveStoredFilePath
 } from "./config.js";
-import { getActiveEvent, formatEventOrderNo, syncLegacyNumberSettings } from "./db.js";
+import { getActiveEvent, formatEventOrderNo, syncLegacyNumberSettings, getSettings } from "./db.js";
 import { getRequestUser, writeAuditLog } from "./auth.js";
 import { createTicketPdf } from "./pdf.js";
 
@@ -63,9 +63,11 @@ async function createOrderFromPayload(req) {
 
   try {
     await fs.writeFile(resolveStoredFilePath(created.pngPath), imageDataToBuffer(pngDataUrl));
+    const settings = await getSettings();
     await createTicketPdf(
       { order_no: created.orderNo, customer_text: customerText, generated_at: created.generatedAt },
-      resolveStoredFilePath(created.pdfPath)
+      resolveStoredFilePath(created.pdfPath),
+      settings.ticketPrintLayout
     );
   } catch (error) {
     db.prepare("DELETE FROM orders WHERE id = ?").run(created.id);

@@ -1752,35 +1752,60 @@ tbody tr:hover {
 }
 
 .ticket-print {
-  align-items: center;
+  --ticket-align-items: center;
+  --ticket-content-align: center;
+  --ticket-height: 60mm;
+  --ticket-name-font-size: 27.2pt;
+  --ticket-name-margin-bottom: 5mm;
+  --ticket-padding-top: 6mm;
+  --ticket-serial-font-size: 16pt;
+  --ticket-serial-margin-bottom: 4mm;
+  --ticket-time-font-size: 9.6pt;
+  --ticket-top-offset: 0mm;
+  --ticket-width: 80mm;
+  align-items: var(--ticket-align-items);
   background: #ffffff;
+  box-sizing: border-box;
   color: #000000;
   display: flex;
   flex-direction: column;
   font-family: Helvetica, Arial, sans-serif;
-  height: 11cm;
-  justify-content: center;
-  line-height: 1.2;
-  text-align: center;
-  width: 7cm;
+  height: var(--ticket-height);
+  justify-content: flex-start;
+  line-height: 1;
+  padding: max(0mm, calc(var(--ticket-padding-top) + var(--ticket-top-offset))) 2.4mm 0;
+  text-align: var(--ticket-content-align);
+  width: var(--ticket-width);
+}
+
+.ticket-print.align-left {
+  --ticket-align-items: flex-start;
+}
+
+.ticket-print.align-right {
+  --ticket-align-items: flex-end;
 }
 
 .ticket-name {
-  font-size: 28pt;
+  font-size: var(--ticket-name-font-size);
   font-weight: 700;
-  max-width: 84%;
+  line-height: 1;
+  margin-bottom: var(--ticket-name-margin-bottom);
+  max-width: 94%;
   overflow-wrap: anywhere;
 }
 
 .ticket-no {
-  font-size: 14pt;
-  font-weight: 600;
-  margin-top: 8mm;
+  font-size: var(--ticket-serial-font-size);
+  font-weight: 500;
+  line-height: 1;
+  margin-bottom: var(--ticket-serial-margin-bottom);
 }
 
 .ticket-time {
-  font-size: 9pt;
-  margin-top: 5mm;
+  font-size: var(--ticket-time-font-size);
+  font-weight: 400;
+  line-height: 1;
 }
 
 .imposition-print-shell {
@@ -2129,10 +2154,10 @@ tbody tr:hover {
   }
 
   .print-sheet .ticket-print {
-    height: 11cm;
+    height: var(--ticket-height);
     max-height: none;
     max-width: none;
-    width: 7cm;
+    width: var(--ticket-width);
   }
 
   .imposition-print-shell {

@@ -1,0 +1,13 @@
+{
+  "id": "add-ticket-content-alignment",
+  "title": "热敏小票增加整体左中右对齐",
+  "status": "completed",
+  "complexity": "M",
+  "risk": "medium",
+  "domain": "frontend",
+  "currentPhase": "completed",
+  "nextAction": "已归档",
+  "createdAt": "2026-06-05T00:00:00+08:00",
+  "branch": "master"
+}
+}

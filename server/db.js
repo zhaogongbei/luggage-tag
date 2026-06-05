@@ -9,7 +9,7 @@ import {
   tokenCleanupIntervalMs, auditLogRetention, auditCleanupIntervalMs,
   exportCleanupIntervalMs, exportCleanupMinAgeMs,
   brandLogoCandidates,
-  defaultSettings,
+  defaultSettings, normalizeTicketPrintLayout,
   dataDir, normalizePathForCompare, toRelativeExportPath
 } from "./config.js";
 
@@ -288,6 +288,7 @@ async function getSettings() {
   const rows = db.prepare("SELECT key, value FROM settings").all();
   const settings = Object.fromEntries(rows.map((r) => [r.key, r.value]));
   const activeEvent = getActiveEvent();
+  const printLayout = normalizeTicketPrintLayout(settings);
   return {
     prefix: activeEvent.prefix, currentNumber: Number(activeEvent.current_number), digits: Number(activeEvent.digits),
     watermarkEnabled: (settings.watermarkEnabled ?? defaultSettings.watermarkEnabled) === "true",
@@ -296,12 +297,13 @@ async function getSettings() {
     selectedPrinter: settings.selectedPrinter ?? defaultSettings.selectedPrinter,
     deploymentMode: ["private", "invite", "public", "maintenance"].includes(settings.deploymentMode) ? settings.deploymentMode : defaultSettings.deploymentMode,
     inviteCode: settings.inviteCode ?? defaultSettings.inviteCode,
+    ticketPrintLayout: printLayout,
     activeEvent: toPublicEvent(activeEvent)
   };
 }
 
 function toClientSettings(s) {
-  return { prefix: s.prefix, currentNumber: s.currentNumber, digits: s.digits, watermarkEnabled: s.watermarkEnabled, creatorAutoPrint: s.creatorAutoPrint, creatorAutoReturn: s.creatorAutoReturn, deploymentMode: s.deploymentMode, activeEvent: s.activeEvent };
+  return { prefix: s.prefix, currentNumber: s.currentNumber, digits: s.digits, watermarkEnabled: s.watermarkEnabled, creatorAutoPrint: s.creatorAutoPrint, creatorAutoReturn: s.creatorAutoReturn, deploymentMode: s.deploymentMode, ticketPrintLayout: s.ticketPrintLayout, activeEvent: s.activeEvent };
 }
 
 function normalizeEventPayload(body) {

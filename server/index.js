@@ -8,7 +8,7 @@ import {
   rootDir, port, host, allowedOrigins,
   sessionCookieName, inviteCookieName, sessionTtlMs, inviteTtlMs, loginMaxFailures, loginLockMs,
   deploymentModes, defaultLayoutOptions, resolveStoredFilePath,
-  allowDefaultPasswordOnPublicHost
+  allowDefaultPasswordOnPublicHost, normalizeTicketPrintLayout
 } from "./config.js";
 
 import {
@@ -66,6 +66,18 @@ function isAllowedOrigin(origin, req) {
 
 function isPublicHostBinding() {
   return ["0.0.0.0", "::", "[::]"].includes(String(host).toLowerCase());
+}
+
+function saveSetting(key, value) {
+  db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run(key, String(value));
+}
+
+function withTicketLayoutProductDefaults(layoutOptions, printLayout) {
+  return {
+    ...layoutOptions,
+    productWidth: layoutOptions.productWidth ?? printLayout.widthMm,
+    productHeight: layoutOptions.productHeight ?? printLayout.heightMm
+  };
 }
 
 function canAccessCustomerOrder(req, order) {
@@ -293,6 +305,7 @@ app.get("/api/settings", requireSettingsAccess, async (req, res) => {
 });
 
 app.put("/api/settings", requireRole(["super_admin"]), async (req, res) => {
+  const currentSettings = await getSettings();
   const prefix = String(req.body.prefix ?? "No.").slice(0, 12);
   const currentNumber = Math.max(1, Number.parseInt(req.body.currentNumber, 10) || 1);
   const digits = Math.min(8, Math.max(1, Number.parseInt(req.body.digits, 10) || 4));
@@ -302,17 +315,28 @@ app.put("/api/settings", requireRole(["super_admin"]), async (req, res) => {
   const selectedPrinter = String(req.body.selectedPrinter ?? "").slice(0, 160);
   const deploymentMode = deploymentModes.includes(req.body.deploymentMode) ? req.body.deploymentMode : "private";
   const inviteCode = String(req.body.inviteCode ?? "").slice(0, 64);
-  db.prepare("UPDATE settings SET value = ? WHERE key = 'prefix'").run(prefix);
-  db.prepare("UPDATE settings SET value = ? WHERE key = 'currentNumber'").run(String(currentNumber));
-  db.prepare("UPDATE settings SET value = ? WHERE key = 'digits'").run(String(digits));
+  const ticketLayout = normalizeTicketPrintLayout(req.body.ticketPrintLayout ?? {}, currentSettings.ticketPrintLayout);
+  saveSetting("prefix", prefix);
+  saveSetting("currentNumber", currentNumber);
+  saveSetting("digits", digits);
   db.prepare("UPDATE events SET prefix = ?, current_number = ?, digits = ? WHERE id = ?").run(prefix, currentNumber, digits, getActiveEvent().id);
-  db.prepare("UPDATE settings SET value = ? WHERE key = 'watermarkEnabled'").run(String(watermarkEnabled));
-  db.prepare("UPDATE settings SET value = ? WHERE key = 'creatorAutoPrint'").run(String(creatorAutoPrint));
-  db.prepare("UPDATE settings SET value = ? WHERE key = 'creatorAutoReturn'").run(String(creatorAutoReturn));
-  db.prepare("UPDATE settings SET value = ? WHERE key = 'selectedPrinter'").run(selectedPrinter);
-  db.prepare("UPDATE settings SET value = ? WHERE key = 'deploymentMode'").run(deploymentMode);
-  db.prepare("UPDATE settings SET value = ? WHERE key = 'inviteCode'").run(inviteCode);
-  writeAuditLog(req, "settings.update", "settings", "system", { deploymentMode, creatorAutoPrint, creatorAutoReturn });
+  saveSetting("watermarkEnabled", watermarkEnabled);
+  saveSetting("creatorAutoPrint", creatorAutoPrint);
+  saveSetting("creatorAutoReturn", creatorAutoReturn);
+  saveSetting("selectedPrinter", selectedPrinter);
+  saveSetting("deploymentMode", deploymentMode);
+  saveSetting("inviteCode", inviteCode);
+  saveSetting("ticketWidthMm", ticketLayout.widthMm);
+  saveSetting("ticketHeightMm", ticketLayout.heightMm);
+  saveSetting("ticketTopOffsetMm", ticketLayout.topOffsetMm);
+  saveSetting("ticketPaddingTopMm", ticketLayout.paddingTopMm);
+  saveSetting("ticketNameFontSize", ticketLayout.nameFontSize);
+  saveSetting("ticketSerialFontSize", ticketLayout.serialFontSize);
+  saveSetting("ticketTimeFontSize", ticketLayout.timeFontSize);
+  saveSetting("ticketNameMarginBottomMm", ticketLayout.nameMarginBottomMm);
+  saveSetting("ticketSerialMarginBottomMm", ticketLayout.serialMarginBottomMm);
+  saveSetting("ticketContentAlign", ticketLayout.contentAlign);
+  writeAuditLog(req, "settings.update", "settings", "system", { deploymentMode, creatorAutoPrint, creatorAutoReturn, ticketPrintLayout: ticketLayout });
   res.json(await getSettings());
 });
 
@@ -379,7 +403,8 @@ app.get("/api/orders/stats", requireRole(["super_admin", "admin", "client"]), as
 
 app.post("/api/layout/preview", requireRole(["super_admin", "admin"]), async (req, res) => {
   try {
-    const layout = computeImpositionLayout(req.body.layoutOptions ?? req.body);
+    const settings = await getSettings();
+    const layout = computeImpositionLayout(withTicketLayoutProductDefaults(req.body.layoutOptions ?? req.body, settings.ticketPrintLayout));
     res.json({ paperWidth: layout.pageWidth, paperHeight: layout.pageHeight, productWidth: layout.itemWidth, productHeight: layout.itemHeight, columns: layout.columns, rows: layout.rows, capacity: layout.capacity, autoRotated: layout.itemRotated, pageRotated: layout.pageRotated, gap: layout.gap, margin: layout.margin, showOrderNo: layout.showOrderNo, cropMarks: layout.cropMarks, labelHeight: layout.labelHeight, positions: layout.positions });
   } catch (error) { res.status(400).json({ message: error.message }); }
 });
@@ -389,9 +414,10 @@ app.post("/api/orders/imposition", requireRole(["super_admin", "admin"]), async 
   const orders = getOrdersByIds(orderIds);
   if (!orders.length) { return res.status(400).json({ message: "Select at least one order" }); }
   try {
-    const layoutOptions = req.body.layoutOptions ?? req.body;
+    const settings = await getSettings();
+    const layoutOptions = withTicketLayoutProductDefaults(req.body.layoutOptions ?? req.body, settings.ticketPrintLayout);
     const layout = computeImpositionLayout(layoutOptions);
-    const pdfBuffer = await createImpositionPdf(orders, layoutOptions);
+    const pdfBuffer = await createImpositionPdf(orders, layoutOptions, settings.ticketPrintLayout);
     const filename = `imposition-${layout.paperPreset.toLowerCase()}-${new Date().toISOString().replace(/[:.]/g, "-")}.pdf`;
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
@@ -405,7 +431,8 @@ app.post("/api/orders/a4-layout", requireRole(["super_admin", "admin"]), async (
   const orders = getOrdersByIds(orderIds);
   if (!orders.length) { return res.status(400).json({ message: "Select at least one order" }); }
   try {
-    const pdfBuffer = await createImpositionPdf(orders, { ...defaultLayoutOptions, ...(req.body.layoutOptions ?? {}), showOrderNo: req.body.showOrderNo !== false });
+    const settings = await getSettings();
+    const pdfBuffer = await createImpositionPdf(orders, { ...defaultLayoutOptions, productWidth: settings.ticketPrintLayout.widthMm, productHeight: settings.ticketPrintLayout.heightMm, ...(req.body.layoutOptions ?? {}), showOrderNo: req.body.showOrderNo !== false }, settings.ticketPrintLayout);
     const filename = `a4-layout-${new Date().toISOString().replace(/[:.]/g, "-")}.pdf`;
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
@@ -416,13 +443,15 @@ app.post("/api/orders/a4-layout", requireRole(["super_admin", "admin"]), async (
 app.get("/api/orders/batch", requireRole(["super_admin", "admin"]), async (req, res) => {
   const orderIds = parseOrderIds(req.query.ids);
   const orders = getOrdersByIds(orderIds);
-  res.json(orders.map(toPublicOrder));
+  const settings = await getSettings();
+  res.json(orders.map((order) => ({ ...toPublicOrder(order), ticketPrintLayout: settings.ticketPrintLayout })));
 });
 
 app.get("/api/orders/:id", requireRole(["super_admin", "admin", "client"]), async (req, res) => {
   const order = getOrderById(req.params.id, { includeDeleted: true, user: getRequestUser(req) });
   if (!order) { return res.status(404).json({ message: "Order not found" }); }
-  res.json(toPublicOrder(order));
+  const settings = await getSettings();
+  res.json({ ...toPublicOrder(order), ticketPrintLayout: settings.ticketPrintLayout });
 });
 
 app.get("/api/orders/:id/ticket", requireCustomerAccess, async (req, res) => {
@@ -430,7 +459,8 @@ app.get("/api/orders/:id/ticket", requireCustomerAccess, async (req, res) => {
   const order = getOrderById(req.params.id, { includeDeleted: false, user });
   if (!order) { return res.status(404).json({ message: "Order not found" }); }
   if (!canAccessCustomerOrder(req, order)) { return res.status(403).json({ message: "Order access denied" }); }
-  res.json(toPublicOrder(order));
+  const settings = await getSettings();
+  res.json({ ...toPublicOrder(order), ticketPrintLayout: settings.ticketPrintLayout });
 });
 
 app.post("/api/orders", requireCustomerAccess, async (req, res) => {
@@ -540,7 +570,8 @@ app.get("/api/orders/:id/download/:type", requireRole(["super_admin", "admin"]),
   const order = getOrderById(req.params.id, { includeDeleted: true });
   if (!order) { return res.status(404).json({ message: "Order not found" }); }
   if (type === "pdf") {
-    const pdfBuffer = createTicketPdfBuffer(order);
+    const settings = await getSettings();
+    const pdfBuffer = createTicketPdfBuffer(order, settings.ticketPrintLayout);
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="${order.order_no}.pdf"`);
     return res.send(pdfBuffer);
@@ -553,7 +584,11 @@ app.get("/api/orders/:id/file/:type", requireRole(["super_admin", "admin"]), asy
   if (!["png", "pdf"].includes(type)) { return res.status(400).json({ message: "Unsupported file type" }); }
   const order = getOrderById(req.params.id, { includeDeleted: true });
   if (!order) { return res.status(404).json({ message: "Order not found" }); }
-  if (type === "pdf") { res.type("pdf"); return res.send(createTicketPdfBuffer(order)); }
+  if (type === "pdf") {
+    const settings = await getSettings();
+    res.type("pdf");
+    return res.send(createTicketPdfBuffer(order, settings.ticketPrintLayout));
+  }
   const filePath = resolveStoredFilePath(order.png_path);
   res.type(type);
   res.sendFile(filePath);

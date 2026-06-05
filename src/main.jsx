@@ -4,7 +4,7 @@ import { Home, LogOut, Settings } from "lucide-react";
 import "./styles.css";
 
 import { apiFetch } from "./lib/api";
-import { defaultLayoutOptions } from "./lib/constants";
+import { defaultLayoutOptions, ticketPrintLayout } from "./lib/constants";
 import { parseBooleanParam } from "./lib/validate";
 import { BrandLogo } from "./components/BrandLogo";
 import { PrintPage } from "./pages/PrintPage";
@@ -31,7 +31,8 @@ function App() {
     watermarkEnabled: true,
     creatorAutoPrint: false,
     creatorAutoReturn: false,
-    deploymentMode: "private"
+    deploymentMode: "private",
+    ticketPrintLayout
   });
   const [previewNumber, setPreviewNumber] = useState("No.0001");
   const [loading, setLoading] = useState(true);

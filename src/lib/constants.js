@@ -33,12 +33,25 @@ export const paperPresets = {
   CUSTOM: { width: 210, height: 297 },
 };
 
+export const ticketPrintLayout = {
+  widthMm: 80,
+  heightMm: 60,
+  topOffsetMm: 0,
+  paddingTopMm: 6,
+  nameFontSize: 27.2,
+  serialFontSize: 16,
+  timeFontSize: 9.6,
+  nameMarginBottomMm: 5,
+  serialMarginBottomMm: 4,
+  contentAlign: "center",
+};
+
 export const defaultLayoutOptions = {
   paperPreset: "A4",
   paperWidth: 210,
   paperHeight: 297,
-  productWidth: 70,
-  productHeight: 110,
+  productWidth: ticketPrintLayout.widthMm,
+  productHeight: ticketPrintLayout.heightMm,
   margin: 8,
   gap: 6,
   autoRotate: true,
@@ -49,15 +62,15 @@ export const defaultLayoutOptions = {
 export const layoutPresets = [
   {
     name: "A4 标准",
-    options: { paperPreset: "A4", paperWidth: 210, paperHeight: 297, productWidth: 70, productHeight: 110, margin: 8, gap: 6 },
+    options: { paperPreset: "A4", paperWidth: 210, paperHeight: 297, productWidth: ticketPrintLayout.widthMm, productHeight: ticketPrintLayout.heightMm, margin: 8, gap: 6 },
   },
   {
     name: "A3 批量",
-    options: { paperPreset: "A3", paperWidth: 297, paperHeight: 420, productWidth: 70, productHeight: 110, margin: 10, gap: 6 },
+    options: { paperPreset: "A3", paperWidth: 297, paperHeight: 420, productWidth: ticketPrintLayout.widthMm, productHeight: ticketPrintLayout.heightMm, margin: 10, gap: 6 },
   },
   {
     name: "A5 小版",
-    options: { paperPreset: "A5", paperWidth: 148, paperHeight: 210, productWidth: 70, productHeight: 110, margin: 6, gap: 4 },
+    options: { paperPreset: "A5", paperWidth: 148, paperHeight: 210, productWidth: ticketPrintLayout.widthMm, productHeight: ticketPrintLayout.heightMm, margin: 6, gap: 4 },
   },
 ];
 

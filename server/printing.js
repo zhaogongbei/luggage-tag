@@ -4,7 +4,6 @@ import crypto from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { exportDir } from "./config.js";
-import { resolveStoredFilePath } from "./config.js";
 import { getSettings } from "./db.js";
 import { formatTicketDateTime, createTicketPdf } from "./pdf.js";
 
@@ -12,6 +11,10 @@ const execFileAsync = promisify(execFile);
 
 const PRINTER_CACHE_TTL_MS = 30_000;
 let printerCache = { data: null, fetchedAt: 0 };
+
+function mmToHundredthsInch(value) {
+  return Math.round(value * 100 / 25.4);
+}
 
 async function getSystemPrintersFresh() {
   if (process.platform === "win32") { return getWindowsPrinters(); }
@@ -77,7 +80,18 @@ async function resolvePrinterName(requestedPrinterName = "") {
 }
 
 async function printTicketDirectWindows(order, requestedPrinterName = "") {
+  const settings = await getSettings();
+  const printLayout = settings.ticketPrintLayout;
   const printerName = await resolvePrinterName(requestedPrinterName);
+  const paperWidth = mmToHundredthsInch(printLayout.widthMm);
+  const paperHeight = mmToHundredthsInch(printLayout.heightMm);
+  const topY = Math.max(0, printLayout.paddingTopMm + printLayout.topOffsetMm);
+  const paperName = `LuggageTag${String(printLayout.widthMm).replace(/\D/g, "")}x${String(printLayout.heightMm).replace(/\D/g, "")}`;
+  const contentAlign = printLayout.contentAlign ?? "center";
+  const contentInsetMm = printLayout.widthMm * 0.03;
+  const textRectX = contentAlign === "center" ? 0 : contentInsetMm;
+  const textRectWidth = contentAlign === "center" ? printLayout.widthMm : printLayout.widthMm - contentInsetMm * 2;
+  const gdiAlignment = contentAlign === "left" ? "Near" : contentAlign === "right" ? "Far" : "Center";
   const script = `
 $ErrorActionPreference = "Stop"
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -95,7 +109,7 @@ if (-not [string]::IsNullOrWhiteSpace($printerName)) {
 if (-not $document.PrinterSettings.IsValid) {
   throw ("\u6253\u5370\u673A\u4E0D\u53EF\u7528\uFF1A" + $document.PrinterSettings.PrinterName)
 }
-$document.DefaultPageSettings.PaperSize = New-Object System.Drawing.Printing.PaperSize("LuggageTag70x110", 276, 433)
+$document.DefaultPageSettings.PaperSize = New-Object System.Drawing.Printing.PaperSize("${paperName}", ${paperWidth}, ${paperHeight})
 $document.DefaultPageSettings.Margins = New-Object System.Drawing.Printing.Margins(0, 0, 0, 0)
 $document.OriginAtMargins = $false
 $document.add_PrintPage({
@@ -104,15 +118,24 @@ $document.add_PrintPage({
   $graphics.PageUnit = [System.Drawing.GraphicsUnit]::Millimeter
   $graphics.Clear([System.Drawing.Color]::White)
   $centerFormat = New-Object System.Drawing.StringFormat
-  $centerFormat.Alignment = [System.Drawing.StringAlignment]::Center
-  $centerFormat.LineAlignment = [System.Drawing.StringAlignment]::Center
-  $nameFont = New-Object System.Drawing.Font("Arial", 18, [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Point)
-  $noFont = New-Object System.Drawing.Font("Arial", 10, [System.Drawing.FontStyle]::Regular, [System.Drawing.GraphicsUnit]::Point)
-  $timeFont = New-Object System.Drawing.Font("Arial", 7, [System.Drawing.FontStyle]::Regular, [System.Drawing.GraphicsUnit]::Point)
+  $centerFormat.Alignment = [System.Drawing.StringAlignment]::${gdiAlignment}
+  $centerFormat.LineAlignment = [System.Drawing.StringAlignment]::Near
+  $textRectX = ${textRectX}
+  $textRectWidthMm = ${textRectWidth}
+  $topY = ${topY}
+  $nameFontSize = ${printLayout.nameFontSize}
+  $serialFontSize = ${printLayout.serialFontSize}
+  $timeFontSize = ${printLayout.timeFontSize}
+  $nameHeight = $nameFontSize * 25.4 / 72
+  $serialHeight = $serialFontSize * 25.4 / 72
+  $timeHeight = $timeFontSize * 25.4 / 72
+  $nameFont = New-Object System.Drawing.Font("Arial", $nameFontSize, [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Point)
+  $noFont = New-Object System.Drawing.Font("Arial", $serialFontSize, [System.Drawing.FontStyle]::Regular, [System.Drawing.GraphicsUnit]::Point)
+  $timeFont = New-Object System.Drawing.Font("Arial", $timeFontSize, [System.Drawing.FontStyle]::Regular, [System.Drawing.GraphicsUnit]::Point)
   try {
-    $graphics.DrawString($customerText, $nameFont, [System.Drawing.Brushes]::Black, (New-Object System.Drawing.RectangleF(4, 42, 62, 14)), $centerFormat)
-    $graphics.DrawString($orderNo, $noFont, [System.Drawing.Brushes]::Black, (New-Object System.Drawing.RectangleF(4, 61, 62, 8)), $centerFormat)
-    $graphics.DrawString($generatedAt, $timeFont, [System.Drawing.Brushes]::Black, (New-Object System.Drawing.RectangleF(4, 73, 62, 8)), $centerFormat)
+    $graphics.DrawString($customerText, $nameFont, [System.Drawing.Brushes]::Black, (New-Object System.Drawing.RectangleF($textRectX, $topY, $textRectWidthMm, ($nameHeight + 1))), $centerFormat)
+    $graphics.DrawString($orderNo, $noFont, [System.Drawing.Brushes]::Black, (New-Object System.Drawing.RectangleF($textRectX, ($topY + $nameHeight + ${printLayout.nameMarginBottomMm}), $textRectWidthMm, ($serialHeight + 1))), $centerFormat)
+    $graphics.DrawString($generatedAt, $timeFont, [System.Drawing.Brushes]::Black, (New-Object System.Drawing.RectangleF($textRectX, ($topY + $nameHeight + ${printLayout.nameMarginBottomMm} + $serialHeight + ${printLayout.serialMarginBottomMm}), $textRectWidthMm, ($timeHeight + 1))), $centerFormat)
   } finally {
     $nameFont.Dispose()
     $noFont.Dispose()
@@ -156,13 +179,9 @@ async function printTicketDirectCups(order, requestedPrinterName = "") {
     throw new Error("\u670D\u52A1\u5668\u672A\u914D\u7F6E\u672C\u5730\u6253\u5370\u670D\u52A1\uFF1A\u5F53\u524D\u7CFB\u7EDF\u672A\u627E\u5230 lp/lpr\u3002\u8BF7\u5728\u670D\u52A1\u5668\u914D\u7F6E CUPS/\u7F51\u7EDC\u6253\u5370\u673A\uFF0C\u6216\u628A\u670D\u52A1\u90E8\u7F72\u5230\u8FDE\u63A5\u6253\u5370\u673A\u7684 Windows \u4E3B\u673A");
   }
   const printerName = await resolvePrinterName(requestedPrinterName);
-  let pdfPath = order.pdf_path ? resolveStoredFilePath(order.pdf_path) : "";
-  let shouldRemovePdf = false;
-  if (!pdfPath) {
-    pdfPath = path.join(exportDir, `test-ticket-${Date.now()}-${crypto.randomBytes(4).toString("hex")}.pdf`);
-    await createTicketPdf(order, pdfPath);
-    shouldRemovePdf = true;
-  }
+  const settings = await getSettings();
+  const pdfPath = path.join(exportDir, `test-ticket-${Date.now()}-${crypto.randomBytes(4).toString("hex")}.pdf`);
+  await createTicketPdf(order, pdfPath, settings.ticketPrintLayout);
   try {
     const args = printCommand === "lp"
       ? [...(printerName ? ["-d", printerName] : []), pdfPath]
@@ -170,7 +189,7 @@ async function printTicketDirectCups(order, requestedPrinterName = "") {
     await execFileAsync(printCommand, args, { timeout: 30_000 });
     return { printerName: printerName || "\u9ED8\u8BA4\u6253\u5370\u673A" };
   } finally {
-    if (shouldRemovePdf) { await fs.unlink(pdfPath).catch(() => {}); }
+    await fs.unlink(pdfPath).catch(() => {});
   }
 }
 

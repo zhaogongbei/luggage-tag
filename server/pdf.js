@@ -1,6 +1,33 @@
 import fs from "node:fs/promises";
 import { jsPDF } from "jspdf";
-import { defaultLayoutOptions, paperPresets } from "./config.js";
+import { defaultLayoutOptions, paperPresets, ticketPrintLayout } from "./config.js";
+
+function ptToMm(value) {
+  return value * 25.4 / 72;
+}
+
+function getTicketDrawLayout(width, height, printLayout = ticketPrintLayout) {
+  const scale = Math.max(0.1, Math.min(width / printLayout.widthMm, height / printLayout.heightMm));
+  const nameFontSize = printLayout.nameFontSize * scale;
+  const serialFontSize = printLayout.serialFontSize * scale;
+  const timeFontSize = printLayout.timeFontSize * scale;
+  const topOffset = Math.max(0, printLayout.paddingTopMm + printLayout.topOffsetMm) * scale;
+  const nameY = topOffset;
+  const serialY = nameY + ptToMm(nameFontSize) + printLayout.nameMarginBottomMm * scale;
+  const timeY = serialY + ptToMm(serialFontSize) + printLayout.serialMarginBottomMm * scale;
+  return { nameFontSize, serialFontSize, timeFontSize, nameY, serialY, timeY };
+}
+
+function getTicketTextAnchor(x, width, printLayout = ticketPrintLayout) {
+  const contentAlign = printLayout.contentAlign ?? "center";
+  if (contentAlign === "left") {
+    return { x: x + width * 0.03, align: "left" };
+  }
+  if (contentAlign === "right") {
+    return { x: x + width * 0.97, align: "right" };
+  }
+  return { x: x + width / 2, align: "center" };
+}
 
 function formatTicketDateTime(value) {
   return new Intl.DateTimeFormat("zh-CN", {
@@ -10,30 +37,33 @@ function formatTicketDateTime(value) {
   }).format(new Date(value));
 }
 
-function drawTicket(pdf, order, x, y, width, height) {
+function drawTicket(pdf, order, x, y, width, height, printLayout = ticketPrintLayout) {
+  const layout = getTicketDrawLayout(width, height, printLayout);
+  const textAnchor = getTicketTextAnchor(x, width, printLayout);
+
   pdf.setFillColor(255, 255, 255);
   pdf.rect(x, y, width, height, "F");
   pdf.setTextColor(0, 0, 0);
   pdf.setFont("helvetica", "bold");
-  pdf.setFontSize(Math.min(26, width * 0.24));
-  pdf.text(order.customer_text, x + width / 2, y + height * 0.43, { align: "center", maxWidth: width * 0.84 });
+  pdf.setFontSize(layout.nameFontSize);
+  pdf.text(order.customer_text, textAnchor.x, y + layout.nameY, { align: textAnchor.align, baseline: "top", maxWidth: width * 0.94 });
   pdf.setFont("helvetica", "normal");
-  pdf.setFontSize(Math.min(12, width * 0.12));
-  pdf.text(order.order_no, x + width / 2, y + height * 0.57, { align: "center" });
-  pdf.setFontSize(Math.min(8, width * 0.08));
-  pdf.text(formatTicketDateTime(order.generated_at), x + width / 2, y + height * 0.66, { align: "center" });
+  pdf.setFontSize(layout.serialFontSize);
+  pdf.text(order.order_no, textAnchor.x, y + layout.serialY, { align: textAnchor.align, baseline: "top", maxWidth: width * 0.94 });
+  pdf.setFontSize(layout.timeFontSize);
+  pdf.text(formatTicketDateTime(order.generated_at), textAnchor.x, y + layout.timeY, { align: textAnchor.align, baseline: "top", maxWidth: width * 0.94 });
 }
 
-async function createTicketPdf(order, outputPath) {
-  const pdfBuffer = createTicketPdfBuffer(order);
+async function createTicketPdf(order, outputPath, printLayout = ticketPrintLayout) {
+  const pdfBuffer = createTicketPdfBuffer(order, printLayout);
   await fs.writeFile(outputPath, pdfBuffer);
 }
 
-function createTicketPdfBuffer(order) {
-  const width = 70;
-  const height = 110;
-  const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: [width, height], compress: true });
-  drawTicket(pdf, order, 0, 0, width, height);
+function createTicketPdfBuffer(order, printLayout = ticketPrintLayout) {
+  const width = printLayout.widthMm;
+  const height = printLayout.heightMm;
+  const pdf = new jsPDF({ orientation: width >= height ? "landscape" : "portrait", unit: "mm", format: [width, height], compress: true });
+  drawTicket(pdf, order, 0, 0, width, height, printLayout);
   pdf.setProperties({ title: `Luggage Tag Ticket ${order.order_no}` });
   return Buffer.from(pdf.output("arraybuffer"));
 }
@@ -125,7 +155,7 @@ function computeImpositionLayout(rawOptions = {}) {
   return { ...best, positions };
 }
 
-async function createImpositionPdf(orders, rawOptions = {}) {
+async function createImpositionPdf(orders, rawOptions = {}, printLayout = ticketPrintLayout) {
   const layout = computeImpositionLayout(rawOptions);
   const pdf = new jsPDF({
     orientation: layout.pageWidth >= layout.pageHeight ? "landscape" : "portrait",
@@ -135,7 +165,7 @@ async function createImpositionPdf(orders, rawOptions = {}) {
     if (index > 0 && index % layout.capacity === 0) { pdf.addPage(); }
     const position = layout.positions[index % layout.capacity];
     const x = position.x, y = position.y;
-    drawTicket(pdf, order, x, y, layout.itemWidth, layout.itemHeight);
+    drawTicket(pdf, order, x, y, layout.itemWidth, layout.itemHeight, printLayout);
     if (layout.cropMarks) { drawCropMarks(pdf, x, y, layout.itemWidth, layout.itemHeight); }
     if (layout.showOrderNo) {
       pdf.setFont("helvetica", "normal");

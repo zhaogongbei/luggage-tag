@@ -47,6 +47,50 @@ const allowedOrigins = String(process.env.LUGGAGE_TAG_ALLOW_ORIGIN ?? "")
   .map((origin) => origin.trim())
   .filter(Boolean);
 
+function parseLayoutNumber(value, fallback, min, max) {
+  const number = Number.parseFloat(value);
+  if (!Number.isFinite(number)) { return fallback; }
+  return Math.min(max, Math.max(min, number));
+}
+
+function readLayoutNumber(envName, fallback, min, max) {
+  const snakeName = envName.replace(/^LUGGAGE_TAG_/, "").toLowerCase();
+  return parseLayoutNumber(process.env[envName] ?? process.env[snakeName], fallback, min, max);
+}
+
+function normalizeTicketContentAlign(value, fallback = "center") {
+  const align = String(value ?? fallback).toLowerCase();
+  return ["left", "center", "right"].includes(align) ? align : "center";
+}
+
+const ticketPrintLayout = {
+  widthMm: readLayoutNumber("LUGGAGE_TAG_TICKET_WIDTH_MM", 80, 20, 300),
+  heightMm: readLayoutNumber("LUGGAGE_TAG_TICKET_HEIGHT_MM", 60, 20, 300),
+  topOffsetMm: readLayoutNumber("LUGGAGE_TAG_TICKET_TOP_OFFSET_MM", 0, -50, 50),
+  paddingTopMm: readLayoutNumber("LUGGAGE_TAG_TICKET_PADDING_TOP_MM", 6, 0, 100),
+  nameFontSize: readLayoutNumber("LUGGAGE_TAG_TICKET_NAME_FONT_SIZE", 27.2, 6, 120),
+  serialFontSize: readLayoutNumber("LUGGAGE_TAG_TICKET_SERIAL_FONT_SIZE", 16, 6, 80),
+  timeFontSize: readLayoutNumber("LUGGAGE_TAG_TICKET_TIME_FONT_SIZE", 9.6, 4, 48),
+  nameMarginBottomMm: 5,
+  serialMarginBottomMm: 4,
+  contentAlign: normalizeTicketContentAlign(process.env.LUGGAGE_TAG_TICKET_CONTENT_ALIGN ?? process.env.ticket_content_align, "center")
+};
+
+function normalizeTicketPrintLayout(value = {}, fallback = ticketPrintLayout) {
+  return {
+    widthMm: parseLayoutNumber(value.widthMm ?? value.ticketWidthMm, fallback.widthMm, 20, 300),
+    heightMm: parseLayoutNumber(value.heightMm ?? value.ticketHeightMm, fallback.heightMm, 20, 300),
+    topOffsetMm: parseLayoutNumber(value.topOffsetMm ?? value.ticketTopOffsetMm, fallback.topOffsetMm, -50, 50),
+    paddingTopMm: parseLayoutNumber(value.paddingTopMm ?? value.ticketPaddingTopMm, fallback.paddingTopMm, 0, 100),
+    nameFontSize: parseLayoutNumber(value.nameFontSize ?? value.ticketNameFontSize, fallback.nameFontSize, 6, 120),
+    serialFontSize: parseLayoutNumber(value.serialFontSize ?? value.ticketSerialFontSize, fallback.serialFontSize, 6, 80),
+    timeFontSize: parseLayoutNumber(value.timeFontSize ?? value.ticketTimeFontSize, fallback.timeFontSize, 4, 48),
+    nameMarginBottomMm: parseLayoutNumber(value.nameMarginBottomMm ?? value.ticketNameMarginBottomMm, fallback.nameMarginBottomMm, 0, 50),
+    serialMarginBottomMm: parseLayoutNumber(value.serialMarginBottomMm ?? value.ticketSerialMarginBottomMm, fallback.serialMarginBottomMm, 0, 50),
+    contentAlign: normalizeTicketContentAlign(value.contentAlign ?? value.ticketContentAlign ?? value.textAlign ?? value.ticketTextAlign, fallback.contentAlign)
+  };
+}
+
 const defaultSettings = {
   prefix: "No.",
   currentNumber: "1",
@@ -56,7 +100,17 @@ const defaultSettings = {
   creatorAutoReturn: "false",
   selectedPrinter: "",
   deploymentMode: "private",
-  inviteCode: ""
+  inviteCode: "",
+  ticketWidthMm: String(ticketPrintLayout.widthMm),
+  ticketHeightMm: String(ticketPrintLayout.heightMm),
+  ticketTopOffsetMm: String(ticketPrintLayout.topOffsetMm),
+  ticketPaddingTopMm: String(ticketPrintLayout.paddingTopMm),
+  ticketNameFontSize: String(ticketPrintLayout.nameFontSize),
+  ticketSerialFontSize: String(ticketPrintLayout.serialFontSize),
+  ticketTimeFontSize: String(ticketPrintLayout.timeFontSize),
+  ticketNameMarginBottomMm: String(ticketPrintLayout.nameMarginBottomMm),
+  ticketSerialMarginBottomMm: String(ticketPrintLayout.serialMarginBottomMm),
+  ticketContentAlign: ticketPrintLayout.contentAlign
 };
 const deploymentModes = ["private", "invite", "public", "maintenance"];
 const userRoles = ["super_admin", "admin", "client"];
@@ -71,8 +125,8 @@ const defaultLayoutOptions = {
   paperPreset: "A4",
   paperWidth: 210,
   paperHeight: 297,
-  productWidth: 70,
-  productHeight: 110,
+  productWidth: ticketPrintLayout.widthMm,
+  productHeight: ticketPrintLayout.heightMm,
   margin: 8,
   gap: 6,
   showOrderNo: true,
@@ -128,7 +182,7 @@ export {
   forceSecureCookie, trustProxy, allowDefaultPasswordOnPublicHost,
   brandLogoCandidates, allowedOrigins,
   defaultSettings, deploymentModes, userRoles, userStatuses,
-  templateIds, paperPresets, defaultLayoutOptions,
+  templateIds, paperPresets, defaultLayoutOptions, ticketPrintLayout, normalizeTicketPrintLayout,
   normalizePathForCompare, toRelativeExportPath,
   resolveStoredFilePath, getExportRelativePath
 };

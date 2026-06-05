@@ -1,19 +1,21 @@
 import { useEffect, useState } from "react";
 import { Printer } from "lucide-react";
 import { apiFetch } from "../lib/api";
+import { ticketPrintLayout } from "../lib/constants";
 import { TicketPrint } from "../components/TicketPrint";
 
 export function CustomerTicketPrintPage({ orderId, autoPrint, autoReturn }) {
   const [order, setOrder] = useState(null);
   const [error, setError] = useState("");
   const [printStatus, setPrintStatus] = useState("准备好后请点击打印");
+  const printLayout = order?.ticketPrintLayout ?? ticketPrintLayout;
 
   useEffect(() => {
     const style = document.createElement("style");
-    style.textContent = "@page { size: 7cm 11cm; margin: 0; }";
+    style.textContent = `@page { size: ${printLayout.widthMm}mm ${printLayout.heightMm}mm; margin: 0; }`;
     document.head.appendChild(style);
     return () => style.remove();
-  }, []);
+  }, [printLayout.widthMm, printLayout.heightMm]);
 
   useEffect(() => {
     async function loadOrder() {
