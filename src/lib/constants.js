@@ -5,7 +5,7 @@ export const API_BASE =
     : window.location.origin);
 
 export const ORDER_PAGE_SIZE = 50;
-export const APP_VERSION = "V1.4.45";
+export const APP_VERSION = "V1.4.46";
 export const BRAND_LOGO_SRC = `${API_BASE}/brand-logo?v=${encodeURIComponent(APP_VERSION)}`;
 
 export const roleLabels = {
