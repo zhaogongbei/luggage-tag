@@ -1761,7 +1761,6 @@ tbody tr:hover {
   --ticket-serial-font-size: 16pt;
   --ticket-serial-margin-bottom: 4mm;
   --ticket-time-font-size: 9.6pt;
-  --ticket-time-margin-bottom: 3mm;
   --ticket-top-offset: 0mm;
   --ticket-width: 80mm;
   align-items: var(--ticket-align-items);
@@ -1807,7 +1806,77 @@ tbody tr:hover {
   font-size: var(--ticket-time-font-size);
   font-weight: 400;
   line-height: 1;
-  margin-bottom: var(--ticket-time-margin-bottom);
+}
+
+/* 热敏小票排版可视化编辑器 */
+.ticket-layout-editor {
+  align-items: stretch;
+  display: grid;
+  gap: 20px;
+  grid-template-columns: minmax(300px, 1fr) minmax(300px, 1fr);
+}
+.ticket-preview-col {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ticket-preview-stage {
+  align-items: center;
+  background: repeating-linear-gradient(45deg, #f1f3f0, #f1f3f0 8px, #e8ebe6 8px, #e8ebe6 16px);
+  border: 1px solid #d4d9d2;
+  border-radius: 10px;
+  display: flex;
+  flex: 1 1 auto;
+  justify-content: center;
+  min-height: 240px;
+  overflow: auto;
+  padding: 16px;
+}
+.ticket-preview-stage .ticket-print {
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.18);
+  outline: 1px solid #cfcfcf;
+}
+.ticket-preview-meta {
+  color: #5c635a;
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+  gap: 4px;
+  text-align: center;
+}
+.ticket-overflow-warn { color: #b3261e; font-weight: 600; }
+.ticket-preview-hint { color: #8a8f86; }
+.ticket-sample-field { font-size: 13px; }
+.ticket-controls-col { display: flex; flex-direction: column; gap: 14px; }
+.ticket-control-group { display: flex; flex-direction: column; gap: 8px; }
+.ticket-group-title {
+  color: #6b7268;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  margin-top: 4px;
+  text-transform: uppercase;
+}
+.ticket-preset-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.ticket-preset-row .secondary-btn.active { outline: 2px solid #2f6f5e; }
+.ticket-basic-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+}
+.ticket-slider {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 72px 1fr 60px 26px;
+}
+.ticket-slider-label { color: #4a5048; font-size: 13px; }
+.ticket-slider input[type="range"] { width: 100%; }
+.ticket-slider-num { padding: 4px 6px; width: 100%; }
+.ticket-slider-unit { color: #8a8f86; font-size: 12px; }
+.ticket-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 6px; }
+@media (max-width: 720px) {
+  .ticket-layout-editor { grid-template-columns: 1fr; }
 }
 
 .imposition-print-shell {

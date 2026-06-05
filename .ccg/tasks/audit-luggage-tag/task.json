@@ -1,11 +1,11 @@
 {
   "id": "audit-luggage-tag",
   "title": "全项目审查：问题排查与优化空间评估",
-  "status": "completed",
+  "status": "in_progress",
   "strategy": "review-audit",
-  "currentPhase": "4-fix-verified",
-  "nextAction": "4个High已修复并通过 node --check + vite build + eslint (rc=0)。剩余 7 Warning(+新增W-8依赖冲突)/6 Info 待用户决定。改动未提交。",
-  "gate": "综合报告已输出：0 Critical / 4 High / 7 Warning / 6 Info",
+  "currentPhase": "5-feature-review-passed",
+  "nextAction": "二轮 review-audit（热敏小票排版可视化编辑器，8文件+165/-24）通过：0C/0H/0W/4I。提交并推送 origin/master。",
+  "gate": "二轮审查：0 Critical / 0 High / 0 Warning / 4 Info — 可提交",
   "branch": "master",
   "scope": "audit-luggage-tag",
   "createdAt": "2026-06-05T12:35:47Z"

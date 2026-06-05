@@ -49,3 +49,20 @@ Warning/Info 项未改动，留待后续。
 
 ## 验证中新发现 W-8（Warning）
 - eslint@^10.4.1 与 eslint-plugin-react@7.37.5（peer 仅支持 eslint ≤9.7）冲突 → 全新 clone 默认 `npm install` 报 ERESOLVE 失败，须 `--legacy-peer-deps`。建议：降 eslint 至 ^9，或升 eslint-plugin-react 至支持 v10 版本，或加 `.npmrc` `legacy-peer-deps=true`。
+
+## 二轮审查（2026-06-05·提交前 review-audit·热敏小票排版可视化编辑器）
+- 范围: 未提交 diff 8 文件 +165/-24（外部模型本环境不可用，Claude 单模型多角度主审；verify-security/verify-quality 未安装，人工等价审查）。
+- 结论: **0 Critical / 0 High / 0 Warning / 4 Info**。可安全提交。
+
+审查覆盖角度与结论：
+1. `timeMarginBottomMm` 全链路删除一致性 ✓：constants/config(默认值·normalize·defaultSettings)/index(save)/TicketPrint(CSS var)/styles(默认变量·.ticket-time)/pdf(死返回值) 七处全删，repo-wide grep 零残留。`updateTicketLayoutOption` 的 `...ticketPrintLayout` 回填默认对象已不含该键，不会复活。
+2. `applyTicketSizePreset` 连调两次 `updateTicketLayoutOption` ✓：该函数为函数式 `setForm((current)=>...)`，第二次能见第一次结果，width+height 均正确写入，无宽度丢失。
+3. 三引擎一致性 ✓（见 I-1）：DOM 时间为末元素无下边距；PDF timeY=serialY+serialHeight+serialMargin；GDI 删除了 timeMarginBottom 项，不再注入 undefined。
+4. 安全面 ✓：/api/settings 仍 `requireRole(["super_admin"])`；preview 经 TicketPrint→React 转义，previewSampleName 纯客户端 state 不入库；printing.js 模板注入项均为 clamp 后数字，无字符串注入。
+5. 构建/运行 ✓：`node --check` ×5、`eslint`、`vite build` 全 rc=0；dev HMR 全部成功无运行时报错。
+
+Info（非阻断，留待后续）：
+- I-1 `printing.js` GDI 时间 Y 仍含**既有**多余 `+ $timeHeight`（≈3.4mm），使 Windows 直连打印时间比 PDF/DOM 低约一行。本次改动只删了 timeMarginBottom 项（缩小了差距，未引入），该偏移为历史遗留；macOS 无法实测 GDI，建议后续在 Windows 上核对后将 GDI timeY 对齐 PDF 公式。
+- I-2 宽/高数字输入改为 `Number(e.target.value)` 即时转换，清空输入会瞬时变 0（number input 不产生 NaN）。滑块为主路径，影响轻微；如需可加 `|| fallback`。
+- I-3 旧库可能残留 `ticketTimeMarginBottomMm` 设置行，normalize 已忽略，无需迁移（无害孤儿键）。
+- I-4 本环境 verify-security/verify-quality 质量关卡 skill 未安装，已人工等价审查替代。

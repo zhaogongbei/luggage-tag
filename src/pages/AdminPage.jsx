@@ -36,6 +36,24 @@ import {
 import { formatDateTime } from "../lib/format";
 import { normalizeLayoutOptions } from "../lib/layout";
 import { BrandLogo } from "../components/BrandLogo";
+import { TicketPrint } from "../components/TicketPrint";
+
+const ticketSizePresets = [
+  { label: "80×60", widthMm: 80, heightMm: 60 },
+  { label: "58×40", widthMm: 58, heightMm: 40 },
+  { label: "100×80", widthMm: 100, heightMm: 80 },
+];
+
+function LabeledSlider({ label, value, min, max, step, unit, onChange }) {
+  return (
+    <label className="ticket-slider">
+      <span className="ticket-slider-label">{label}</span>
+      <input type="range" min={min} max={max} step={step} value={value} onChange={(event) => onChange(Number(event.target.value))} />
+      <input className="ticket-slider-num" type="number" min={min} max={max} step={step} value={value} onChange={(event) => onChange(Number(event.target.value))} />
+      <span className="ticket-slider-unit">{unit}</span>
+    </label>
+  );
+}
 
 export function AdminPage({ settings, onSettingsSaved, access, onGoCustomer, onLogout }) {
   const [orders, setOrders] = useState([]);
@@ -77,10 +95,18 @@ export function AdminPage({ settings, onSettingsSaved, access, onGoCustomer, onL
   const [orderSearch, setOrderSearch] = useState("");
   const [orderStatusFilter, setOrderStatusFilter] = useState("all");
   const [orderTemplateFilter, setOrderTemplateFilter] = useState("all");
+  const [previewSampleName, setPreviewSampleName] = useState("MARISSA WONG");
+  const [ticketOverflow, setTicketOverflow] = useState(false);
+  const ticketPreviewRef = useRef(null);
   const isSuperAdmin = access?.role === "super_admin";
   const canUseAdminTools = ["super_admin", "admin"].includes(access?.role);
   const orderStats = serverOrderStats;
   const ticketLayout = { ...ticketPrintLayout, ...(form.ticketPrintLayout ?? {}) };
+  const ticketSampleOrder = {
+    customer_text: previewSampleName || "MARISSA WONG",
+    order_no: `${form.prefix ?? "No."}0001`,
+    generated_at: new Date().toISOString(),
+  };
   const filteredOrders = orders.filter((order) => {
     const keyword = orderSearch.trim().toUpperCase();
     const matchesKeyword = !keyword ||
@@ -242,6 +268,11 @@ export function AdminPage({ settings, onSettingsSaved, access, onGoCustomer, onL
     };
   }, []);
 
+  useEffect(() => {
+    const el = ticketPreviewRef.current?.querySelector(".ticket-print");
+    if (el) { setTicketOverflow(el.scrollHeight > el.clientHeight + 1); }
+  }, [form.ticketPrintLayout, previewSampleName]);
+
   async function saveSettings() {
     if (!isSuperAdmin) { setPrinterMessage("只有 Super Admin 可以修改系统设置"); return; }
     if (Number(form.currentNumber) < Number(settings.currentNumber) &&
@@ -354,6 +385,15 @@ export function AdminPage({ settings, onSettingsSaved, access, onGoCustomer, onL
         [key]: value
       }
     }));
+  }
+
+  function applyTicketSizePreset(preset) {
+    updateTicketLayoutOption("widthMm", preset.widthMm);
+    updateTicketLayoutOption("heightMm", preset.heightMm);
+  }
+
+  function resetTicketLayout() {
+    setForm((current) => ({ ...current, ticketPrintLayout: { ...ticketPrintLayout } }));
   }
 
   function applyLayoutPreset(preset) {
@@ -557,21 +597,56 @@ export function AdminPage({ settings, onSettingsSaved, access, onGoCustomer, onL
       </section>}
       {adminTab === "settings" && isSuperAdmin && <section className="panel ticket-layout-panel">
         <div className="section-title"><Printer size={20} /><span>热敏小票排版</span></div>
-        <div className="settings-grid">
-          <label className="field"><span>小票宽 mm</span><input min="20" max="300" step="0.1" type="number" value={ticketLayout.widthMm} onChange={(e) => updateTicketLayoutOption("widthMm", e.target.value)} /></label>
-          <label className="field"><span>小票高 mm</span><input min="20" max="300" step="0.1" type="number" value={ticketLayout.heightMm} onChange={(e) => updateTicketLayoutOption("heightMm", e.target.value)} /></label>
-          <label className="field"><span>整体对齐</span><select value={ticketLayout.contentAlign ?? "center"} onChange={(e) => updateTicketLayoutOption("contentAlign", e.target.value)}><option value="center">居中</option><option value="left">左对齐</option><option value="right">右对齐</option></select></label>
-          <label className="field"><span>内容上边距 mm</span><input min="0" max="100" step="0.1" type="number" value={ticketLayout.paddingTopMm} onChange={(e) => updateTicketLayoutOption("paddingTopMm", e.target.value)} /></label>
-          <label className="field"><span>整体偏移 mm</span><input min="-50" max="50" step="0.1" type="number" value={ticketLayout.topOffsetMm} onChange={(e) => updateTicketLayoutOption("topOffsetMm", e.target.value)} /></label>
-          <label className="field"><span>姓名字号 pt</span><input min="6" max="120" step="0.1" type="number" value={ticketLayout.nameFontSize} onChange={(e) => updateTicketLayoutOption("nameFontSize", e.target.value)} /></label>
-          <label className="field"><span>编号字号 pt</span><input min="6" max="80" step="0.1" type="number" value={ticketLayout.serialFontSize} onChange={(e) => updateTicketLayoutOption("serialFontSize", e.target.value)} /></label>
-          <label className="field"><span>时间字号 pt</span><input min="4" max="48" step="0.1" type="number" value={ticketLayout.timeFontSize} onChange={(e) => updateTicketLayoutOption("timeFontSize", e.target.value)} /></label>
-          <label className="field"><span>姓名下边距 mm</span><input min="0" max="50" step="0.1" type="number" value={ticketLayout.nameMarginBottomMm} onChange={(e) => updateTicketLayoutOption("nameMarginBottomMm", e.target.value)} /></label>
-          <label className="field"><span>编号下边距 mm</span><input min="0" max="50" step="0.1" type="number" value={ticketLayout.serialMarginBottomMm} onChange={(e) => updateTicketLayoutOption("serialMarginBottomMm", e.target.value)} /></label>
-          <label className="field"><span>时间下边距 mm</span><input min="0" max="50" step="0.1" type="number" value={ticketLayout.timeMarginBottomMm} onChange={(e) => updateTicketLayoutOption("timeMarginBottomMm", e.target.value)} /></label>
-          <div className="mode-help">整体偏移填负数会上移，填正数会下移；保存后浏览器打印、PDF 和直连打印使用同一参数。</div>
+        <div className="ticket-layout-editor">
+          <div className="ticket-preview-col">
+            <div className="ticket-preview-stage" ref={ticketPreviewRef}>
+              <TicketPrint order={ticketSampleOrder} layout={ticketLayout} />
+            </div>
+            <div className="ticket-preview-meta">
+              <span>{ticketLayout.widthMm}×{ticketLayout.heightMm}mm · 1:1 预览</span>
+              {ticketOverflow
+                ? <span className="ticket-overflow-warn">⚠ 内容超出小票，请调小字号或边距</span>
+                : <span className="ticket-preview-hint">改任意参数即时生效</span>}
+            </div>
+            <label className="field ticket-sample-field"><span>预览姓名（仅用于预览）</span>
+              <input value={previewSampleName} onChange={(e) => setPreviewSampleName(e.target.value)} placeholder="MARISSA WONG" />
+            </label>
+            <div className="ticket-control-group">
+              <div className="ticket-group-title">尺寸与对齐</div>
+              <div className="ticket-preset-row">
+                {ticketSizePresets.map((preset) => {
+                  const active = Number(ticketLayout.widthMm) === preset.widthMm && Number(ticketLayout.heightMm) === preset.heightMm;
+                  return (<button className={`secondary-btn inline ${active ? "active" : ""}`} key={preset.label} onClick={() => applyTicketSizePreset(preset)} type="button">{preset.label}mm</button>);
+                })}
+              </div>
+              <div className="ticket-basic-grid">
+                <label className="field"><span>小票宽 mm</span><input min="20" max="300" step="0.1" type="number" value={ticketLayout.widthMm} onChange={(e) => updateTicketLayoutOption("widthMm", Number(e.target.value))} /></label>
+                <label className="field"><span>小票高 mm</span><input min="20" max="300" step="0.1" type="number" value={ticketLayout.heightMm} onChange={(e) => updateTicketLayoutOption("heightMm", Number(e.target.value))} /></label>
+                <label className="field"><span>整体对齐</span><select value={ticketLayout.contentAlign ?? "center"} onChange={(e) => updateTicketLayoutOption("contentAlign", e.target.value)}><option value="center">居中</option><option value="left">左对齐</option><option value="right">右对齐</option></select></label>
+              </div>
+            </div>
+          </div>
+          <div className="ticket-controls-col">
+            <div className="ticket-control-group">
+              <div className="ticket-group-title">字号</div>
+              <LabeledSlider label="姓名" min={6} max={120} step={0.1} unit="pt" value={ticketLayout.nameFontSize} onChange={(v) => updateTicketLayoutOption("nameFontSize", v)} />
+              <LabeledSlider label="编号" min={6} max={80} step={0.1} unit="pt" value={ticketLayout.serialFontSize} onChange={(v) => updateTicketLayoutOption("serialFontSize", v)} />
+              <LabeledSlider label="时间" min={4} max={48} step={0.1} unit="pt" value={ticketLayout.timeFontSize} onChange={(v) => updateTicketLayoutOption("timeFontSize", v)} />
+            </div>
+            <div className="ticket-control-group">
+              <div className="ticket-group-title">位置与间距</div>
+              <LabeledSlider label="内容上边距" min={0} max={100} step={0.5} unit="mm" value={ticketLayout.paddingTopMm} onChange={(v) => updateTicketLayoutOption("paddingTopMm", v)} />
+              <LabeledSlider label="整体偏移" min={-50} max={50} step={0.5} unit="mm" value={ticketLayout.topOffsetMm} onChange={(v) => updateTicketLayoutOption("topOffsetMm", v)} />
+              <LabeledSlider label="姓名下边距" min={0} max={50} step={0.5} unit="mm" value={ticketLayout.nameMarginBottomMm} onChange={(v) => updateTicketLayoutOption("nameMarginBottomMm", v)} />
+              <LabeledSlider label="编号下边距" min={0} max={50} step={0.5} unit="mm" value={ticketLayout.serialMarginBottomMm} onChange={(v) => updateTicketLayoutOption("serialMarginBottomMm", v)} />
+              <div className="mode-help">整体偏移填负数上移、正数下移，用于校准打印机进纸；保存后浏览器打印、PDF、直连打印共用此参数。</div>
+            </div>
+            <div className="ticket-actions">
+              <button className="secondary-btn inline" onClick={resetTicketLayout} type="button"><RefreshCw size={16} />恢复默认</button>
+              <button className="secondary-btn" onClick={saveSettings} type="button"><CheckCircle2 size={18} />保存小票排版</button>
+            </div>
+          </div>
         </div>
-        <button className="secondary-btn" onClick={saveSettings} type="button"><CheckCircle2 size={18} />保存小票排版</button>
       </section>}
       {(adminTab === "settings" || adminTab === "layout") && <section className="panel printer-panel">
         <div className="section-title"><Printer size={20} /><span>打印设置</span></div>
