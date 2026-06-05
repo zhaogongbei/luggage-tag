@@ -1,0 +1,12 @@
+{
+  "id": "adjust-thermal-ticket-layout",
+  "title": "调整热敏小票上方排版",
+  "status": "completed",
+  "complexity": "S",
+  "risk": "medium",
+  "domain": "frontend",
+  "currentPhase": "completed",
+  "nextAction": "归档任务",
+  "createdAt": "2026-06-05T00:00:00+08:00",
+  "branch": "master"
+}
