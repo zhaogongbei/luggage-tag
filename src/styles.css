@@ -1761,6 +1761,9 @@ tbody tr:hover {
   --ticket-serial-font-size: 16pt;
   --ticket-serial-margin-bottom: 4mm;
   --ticket-time-font-size: 9.6pt;
+  --ticket-footer-bottom: 2mm;
+  --ticket-footer-font-size: 6pt;
+  --ticket-footer-opacity: 0.2;
   --ticket-top-offset: 0mm;
   --ticket-width: 80mm;
   align-items: var(--ticket-align-items);
@@ -1806,6 +1809,19 @@ tbody tr:hover {
   font-size: var(--ticket-time-font-size);
   font-weight: 400;
   line-height: 1;
+}
+
+.ticket-footer {
+  font-size: var(--ticket-footer-font-size);
+  font-weight: 400;
+  line-height: 1;
+  margin-bottom: var(--ticket-footer-bottom);
+  margin-top: auto;
+  max-width: 94%;
+  opacity: var(--ticket-footer-opacity);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* 热敏小票排版可视化编辑器 */

@@ -92,6 +92,10 @@ async function printTicketDirectWindows(order, requestedPrinterName = "") {
   const textRectX = contentAlign === "center" ? 0 : contentInsetMm;
   const textRectWidth = contentAlign === "center" ? printLayout.widthMm : printLayout.widthMm - contentInsetMm * 2;
   const gdiAlignment = contentAlign === "left" ? "Near" : contentAlign === "right" ? "Far" : "Center";
+  const footerFontSizePt = Math.max(2, Math.min(20, Number(printLayout.footerFontSizePt) || 6));
+  const footerOpacity = Math.max(0, Math.min(100, Number(printLayout.footerOpacity) || 0));
+  const footerBottomMm = Math.max(0, Math.min(30, Number(printLayout.footerBottomMm) || 0));
+  const footerAlpha = Math.round(footerOpacity * 255 / 100);
   const script = `
 $ErrorActionPreference = "Stop"
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -99,6 +103,7 @@ $printerName = $env:LUGGAGE_TAG_PRINT_PRINTER
 $orderNo = $env:LUGGAGE_TAG_PRINT_ORDER_NO
 $customerText = $env:LUGGAGE_TAG_PRINT_CUSTOMER_TEXT
 $generatedAt = $env:LUGGAGE_TAG_PRINT_GENERATED_AT
+$footerText = $env:LUGGAGE_TAG_PRINT_FOOTER_TEXT
 Add-Type -AssemblyName System.Drawing
 $document = New-Object System.Drawing.Printing.PrintDocument
 $document.DocumentName = "Luggage Tag Ticket " + $orderNo
@@ -129,17 +134,30 @@ $document.add_PrintPage({
   $nameHeight = $nameFontSize * 25.4 / 72
   $serialHeight = $serialFontSize * 25.4 / 72
   $timeHeight = $timeFontSize * 25.4 / 72
+  $footerFontSize = ${footerFontSizePt}
+  $footerHeight = $footerFontSize * 25.4 / 72
+  $footerAlpha = ${footerAlpha}
+  $footerBottomMm = ${footerBottomMm}
+  $paperHeightMm = ${printLayout.heightMm}
   $nameFont = New-Object System.Drawing.Font("Arial", $nameFontSize, [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Point)
   $noFont = New-Object System.Drawing.Font("Arial", $serialFontSize, [System.Drawing.FontStyle]::Regular, [System.Drawing.GraphicsUnit]::Point)
   $timeFont = New-Object System.Drawing.Font("Arial", $timeFontSize, [System.Drawing.FontStyle]::Regular, [System.Drawing.GraphicsUnit]::Point)
+  $footerFont = New-Object System.Drawing.Font("Arial", $footerFontSize, [System.Drawing.FontStyle]::Regular, [System.Drawing.GraphicsUnit]::Point)
+  $footerBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb($footerAlpha, 0, 0, 0))
   try {
     $graphics.DrawString($customerText, $nameFont, [System.Drawing.Brushes]::Black, (New-Object System.Drawing.RectangleF($textRectX, $topY, $textRectWidthMm, ($nameHeight + 1))), $centerFormat)
     $graphics.DrawString($orderNo, $noFont, [System.Drawing.Brushes]::Black, (New-Object System.Drawing.RectangleF($textRectX, ($topY + $nameHeight + ${printLayout.nameMarginBottomMm}), $textRectWidthMm, ($serialHeight + 1))), $centerFormat)
-    $graphics.DrawString($generatedAt, $timeFont, [System.Drawing.Brushes]::Black, (New-Object System.Drawing.RectangleF($textRectX, ($topY + $nameHeight + ${printLayout.nameMarginBottomMm} + $serialHeight + ${printLayout.serialMarginBottomMm} + $timeHeight), $textRectWidthMm, ($timeHeight + 1))), $centerFormat)
+    $graphics.DrawString($generatedAt, $timeFont, [System.Drawing.Brushes]::Black, (New-Object System.Drawing.RectangleF($textRectX, ($topY + $nameHeight + ${printLayout.nameMarginBottomMm} + $serialHeight + ${printLayout.serialMarginBottomMm}), $textRectWidthMm, ($timeHeight + 1))), $centerFormat)
+    if (-not [string]::IsNullOrWhiteSpace($footerText) -and $footerAlpha -gt 0) {
+      $footerY = [Math]::Max(0, $paperHeightMm - $footerBottomMm - $footerHeight)
+      $graphics.DrawString($footerText, $footerFont, $footerBrush, (New-Object System.Drawing.RectangleF($textRectX, $footerY, $textRectWidthMm, ($footerHeight + 1))), $centerFormat)
+    }
   } finally {
     $nameFont.Dispose()
     $noFont.Dispose()
     $timeFont.Dispose()
+    $footerFont.Dispose()
+    $footerBrush.Dispose()
     $centerFormat.Dispose()
   }
   $event.HasMorePages = $false
@@ -157,7 +175,8 @@ try {
       LUGGAGE_TAG_PRINT_PRINTER: printerName,
       LUGGAGE_TAG_PRINT_ORDER_NO: order.order_no,
       LUGGAGE_TAG_PRINT_CUSTOMER_TEXT: order.customer_text,
-      LUGGAGE_TAG_PRINT_GENERATED_AT: formatTicketDateTime(order.generated_at)
+      LUGGAGE_TAG_PRINT_GENERATED_AT: formatTicketDateTime(order.generated_at),
+      LUGGAGE_TAG_PRINT_FOOTER_TEXT: String(printLayout.footerText ?? "").trim()
     },
     timeout: 60_000,
     windowsHide: true

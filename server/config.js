@@ -73,6 +73,10 @@ const ticketPrintLayout = {
   timeFontSize: readLayoutNumber("LUGGAGE_TAG_TICKET_TIME_FONT_SIZE", 9.6, 4, 48),
   nameMarginBottomMm: 5,
   serialMarginBottomMm: 4,
+  footerText: String(process.env.LUGGAGE_TAG_TICKET_FOOTER_TEXT ?? process.env.ticket_footer_text ?? "").slice(0, 200),
+  footerFontSizePt: readLayoutNumber("LUGGAGE_TAG_TICKET_FOOTER_FONT_SIZE_PT", 6, 2, 20),
+  footerOpacity: readLayoutNumber("LUGGAGE_TAG_TICKET_FOOTER_OPACITY", 20, 0, 100),
+  footerBottomMm: readLayoutNumber("LUGGAGE_TAG_TICKET_FOOTER_BOTTOM_MM", 2, 0, 30),
   contentAlign: normalizeTicketContentAlign(process.env.LUGGAGE_TAG_TICKET_CONTENT_ALIGN ?? process.env.ticket_content_align, "center")
 };
 
@@ -87,6 +91,10 @@ function normalizeTicketPrintLayout(value = {}, fallback = ticketPrintLayout) {
     timeFontSize: parseLayoutNumber(value.timeFontSize ?? value.ticketTimeFontSize, fallback.timeFontSize, 4, 48),
     nameMarginBottomMm: parseLayoutNumber(value.nameMarginBottomMm ?? value.ticketNameMarginBottomMm, fallback.nameMarginBottomMm, 0, 50),
     serialMarginBottomMm: parseLayoutNumber(value.serialMarginBottomMm ?? value.ticketSerialMarginBottomMm, fallback.serialMarginBottomMm, 0, 50),
+    footerText: String(value.footerText ?? value.ticketFooterText ?? fallback.footerText ?? "").slice(0, 200),
+    footerFontSizePt: parseLayoutNumber(value.footerFontSizePt ?? value.ticketFooterFontSizePt, fallback.footerFontSizePt, 2, 20),
+    footerOpacity: parseLayoutNumber(value.footerOpacity ?? value.ticketFooterOpacity, fallback.footerOpacity, 0, 100),
+    footerBottomMm: parseLayoutNumber(value.footerBottomMm ?? value.ticketFooterBottomMm, fallback.footerBottomMm, 0, 30),
     contentAlign: normalizeTicketContentAlign(value.contentAlign ?? value.ticketContentAlign ?? value.textAlign ?? value.ticketTextAlign, fallback.contentAlign)
   };
 }
@@ -110,6 +118,10 @@ const defaultSettings = {
   ticketTimeFontSize: String(ticketPrintLayout.timeFontSize),
   ticketNameMarginBottomMm: String(ticketPrintLayout.nameMarginBottomMm),
   ticketSerialMarginBottomMm: String(ticketPrintLayout.serialMarginBottomMm),
+  ticketFooterText: ticketPrintLayout.footerText,
+  ticketFooterFontSizePt: String(ticketPrintLayout.footerFontSizePt),
+  ticketFooterOpacity: String(ticketPrintLayout.footerOpacity),
+  ticketFooterBottomMm: String(ticketPrintLayout.footerBottomMm),
   ticketContentAlign: ticketPrintLayout.contentAlign
 };
 const deploymentModes = ["private", "invite", "public", "maintenance"];

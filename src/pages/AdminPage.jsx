@@ -639,7 +639,11 @@ export function AdminPage({ settings, onSettingsSaved, access, onGoCustomer, onL
               <LabeledSlider label="整体偏移" min={-50} max={50} step={0.5} unit="mm" value={ticketLayout.topOffsetMm} onChange={(v) => updateTicketLayoutOption("topOffsetMm", v)} />
               <LabeledSlider label="姓名下边距" min={0} max={50} step={0.5} unit="mm" value={ticketLayout.nameMarginBottomMm} onChange={(v) => updateTicketLayoutOption("nameMarginBottomMm", v)} />
               <LabeledSlider label="编号下边距" min={0} max={50} step={0.5} unit="mm" value={ticketLayout.serialMarginBottomMm} onChange={(v) => updateTicketLayoutOption("serialMarginBottomMm", v)} />
-              <div className="mode-help">整体偏移填负数上移、正数下移，用于校准打印机进纸；保存后浏览器打印、PDF、直连打印共用此参数。</div>
+              <label className="field"><span>页脚内容</span><input maxLength={200} value={ticketLayout.footerText ?? ""} onChange={(e) => updateTicketLayoutOption("footerText", e.target.value)} placeholder="可留空；例如 . 或活动名" /></label>
+              <LabeledSlider label="页脚字号" min={2} max={20} step={0.5} unit="pt" value={ticketLayout.footerFontSizePt} onChange={(v) => updateTicketLayoutOption("footerFontSizePt", v)} />
+              <LabeledSlider label="页脚透明度" min={0} max={100} step={5} unit="%" value={ticketLayout.footerOpacity} onChange={(v) => updateTicketLayoutOption("footerOpacity", v)} />
+              <LabeledSlider label="页脚距底" min={0} max={30} step={0.5} unit="mm" value={ticketLayout.footerBottomMm} onChange={(v) => updateTicketLayoutOption("footerBottomMm", v)} />
+              <div className="mode-help">整体偏移填负数上移、正数下移，浏览器打印、PDF、直连打印共用。热敏机自动裁纸时，页脚会实际打印在底部，可用低透明度和距底位置辅助纠正裁切与正文居中。</div>
             </div>
             <div className="ticket-actions">
               <button className="secondary-btn inline" onClick={resetTicketLayout} type="button"><RefreshCw size={16} />恢复默认</button>

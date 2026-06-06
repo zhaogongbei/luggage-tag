@@ -1,0 +1,12 @@
+{
+  "id": "release-footer-alignment-update",
+  "title": "发布页脚校准更新并推送 GitHub",
+  "status": "completed",
+  "complexity": "M",
+  "risk": "medium",
+  "domain": "release",
+  "currentPhase": "completed",
+  "nextAction": "Archive task and push release commit",
+  "createdAt": "2026-06-06T13:43:27.2564057+08:00",
+  "branch": "master"
+}

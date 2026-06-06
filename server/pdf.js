@@ -11,11 +11,14 @@ function getTicketDrawLayout(width, height, printLayout = ticketPrintLayout) {
   const nameFontSize = printLayout.nameFontSize * scale;
   const serialFontSize = printLayout.serialFontSize * scale;
   const timeFontSize = printLayout.timeFontSize * scale;
+  const footerFontSize = (Number(printLayout.footerFontSizePt) || 6) * scale;
   const topOffset = Math.max(0, printLayout.paddingTopMm + printLayout.topOffsetMm) * scale;
   const nameY = topOffset;
   const serialY = nameY + ptToMm(nameFontSize) + printLayout.nameMarginBottomMm * scale;
   const timeY = serialY + ptToMm(serialFontSize) + printLayout.serialMarginBottomMm * scale;
-  return { nameFontSize, serialFontSize, timeFontSize, nameY, serialY, timeY };
+  const footerBottom = Math.max(0, Number(printLayout.footerBottomMm) || 0) * scale;
+  const footerY = Math.max(0, height - footerBottom - ptToMm(footerFontSize));
+  return { nameFontSize, serialFontSize, timeFontSize, footerFontSize, nameY, serialY, timeY, footerY };
 }
 
 function getTicketTextAnchor(x, width, printLayout = ticketPrintLayout) {
@@ -40,6 +43,8 @@ function formatTicketDateTime(value) {
 function drawTicket(pdf, order, x, y, width, height, printLayout = ticketPrintLayout) {
   const layout = getTicketDrawLayout(width, height, printLayout);
   const textAnchor = getTicketTextAnchor(x, width, printLayout);
+  const footerText = String(printLayout.footerText ?? "").trim();
+  const footerOpacity = Math.max(0, Math.min(100, Number(printLayout.footerOpacity) || 0));
 
   pdf.setFillColor(255, 255, 255);
   pdf.rect(x, y, width, height, "F");
@@ -52,6 +57,29 @@ function drawTicket(pdf, order, x, y, width, height, printLayout = ticketPrintLa
   pdf.text(order.order_no, textAnchor.x, y + layout.serialY, { align: textAnchor.align, baseline: "top", maxWidth: width * 0.94 });
   pdf.setFontSize(layout.timeFontSize);
   pdf.text(formatTicketDateTime(order.generated_at), textAnchor.x, y + layout.timeY, { align: textAnchor.align, baseline: "top", maxWidth: width * 0.94 });
+  if (footerText && footerOpacity > 0) {
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(layout.footerFontSize);
+    const drawFooter = () => pdf.text(footerText, textAnchor.x, y + layout.footerY, { align: textAnchor.align, baseline: "top", maxWidth: width * 0.94 });
+    let graphicsStateSaved = false;
+    try {
+      pdf.saveGraphicsState();
+      graphicsStateSaved = true;
+      pdf.setGState(new pdf.GState({ opacity: footerOpacity / 100 }));
+      pdf.setTextColor(0, 0, 0);
+      drawFooter();
+      pdf.restoreGraphicsState();
+      graphicsStateSaved = false;
+    } catch {
+      if (graphicsStateSaved) {
+        try { pdf.restoreGraphicsState(); } catch { /* fallback below */ }
+      }
+      const shade = Math.round(255 * (1 - footerOpacity / 100));
+      pdf.setTextColor(shade, shade, shade);
+      drawFooter();
+    }
+    pdf.setTextColor(0, 0, 0);
+  }
 }
 
 async function createTicketPdf(order, outputPath, printLayout = ticketPrintLayout) {

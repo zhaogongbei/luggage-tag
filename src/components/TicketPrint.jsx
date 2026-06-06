@@ -14,14 +14,20 @@ export function TicketPrint({ order, layout }) {
     "--ticket-time-font-size": `${printLayout.timeFontSize}pt`,
     "--ticket-name-margin-bottom": `${printLayout.nameMarginBottomMm}mm`,
     "--ticket-serial-margin-bottom": `${printLayout.serialMarginBottomMm}mm`,
+    "--ticket-footer-font-size": `${printLayout.footerFontSizePt}pt`,
+    "--ticket-footer-opacity": `${Math.max(0, Math.min(100, Number(printLayout.footerOpacity) || 0)) / 100}`,
+    "--ticket-footer-bottom": `${printLayout.footerBottomMm}mm`,
     "--ticket-content-align": contentAlign,
   };
+  const footerOpacity = Math.max(0, Math.min(100, Number(printLayout.footerOpacity) || 0));
+  const footerText = String(printLayout.footerText ?? "").trim();
 
   return (
     <div className={`ticket-print align-${contentAlign}`} style={ticketStyle}>
       <strong className="ticket-name">{order.customer_text}</strong>
       <span className="ticket-no">{order.order_no}</span>
       <time className="ticket-time">{formatDateTime(order.generated_at)}</time>
+      {footerText && footerOpacity > 0 && <span className="ticket-footer">{footerText}</span>}
     </div>
   );
 }

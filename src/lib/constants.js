@@ -43,6 +43,10 @@ export const ticketPrintLayout = {
   timeFontSize: 9.6,
   nameMarginBottomMm: 5,
   serialMarginBottomMm: 4,
+  footerText: "",
+  footerFontSizePt: 6,
+  footerOpacity: 20,
+  footerBottomMm: 2,
   contentAlign: "center",
 };
 
