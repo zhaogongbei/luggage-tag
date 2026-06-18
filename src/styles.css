@@ -623,10 +623,10 @@ input[type="checkbox"] {
 
 .creator-submit-btn {
   align-items: center;
-  background: linear-gradient(135deg, #0e4f45 0%, #16201d 100%);
+  background: linear-gradient(135deg, #F8E9DD 0%, #C9977E 50%, #F8E9DD 100%);
   border: 0;
   border-radius: 30px;
-  box-shadow: 0 22px 52px rgba(14, 79, 69, 0.24);
+  box-shadow: 0 22px 52px rgba(226, 196, 175, 0.18);
   color: white;
   display: inline-flex;
   font-size: clamp(32px, 5vw, 56px);
@@ -640,7 +640,7 @@ input[type="checkbox"] {
 }
 
 .creator-submit-btn:not(:disabled):hover {
-  box-shadow: 0 28px 64px rgba(14, 79, 69, 0.3);
+  box-shadow: 0 28px 64px rgba(226, 196, 175, 0.24);
   transform: translateY(-2px);
 }
 

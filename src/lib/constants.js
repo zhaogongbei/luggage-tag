@@ -79,9 +79,9 @@ export const layoutPresets = [
 ];
 
 export const templates = [
-  { id: "template_01", name: "Deep Grey", displayName: "深灰色", preview: "/templates/template_01.png", color: "#6B625C", textColor: "#F7F1E8" },
-  { id: "template_02", name: "Beige", displayName: "米灰色", preview: "/templates/template_02.png", color: "#B9B39D", textColor: "#111111" },
-  { id: "template_03", name: "Cathay Green", displayName: "国泰绿", preview: "/templates/template_03.png", color: "#0E4F45", textColor: "#F7F1E8" },
+  { id: "template_01", name: "Light Pink", displayName: "淡粉色", preview: "/templates/template_01.png", color: "#D4A5A5", textColor: "#FFFFFF" },
+  { id: "template_02", name: "Light Grey", displayName: "浅灰色", preview: "/templates/template_02.png", color: "#C8CCBE", textColor: "#FFFFFF" },
+  { id: "template_03", name: "Azure Blue", displayName: "蔚蓝色", preview: "/templates/template_03.png", color: "#4A90E2", textColor: "#FFFFFF" },
 ];
 
 export const legacyTemplateNames = {
