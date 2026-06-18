@@ -195,7 +195,7 @@ export function CustomerPage({ settings, previewNumber, onCreated }) {
             onCompositionStart={() => setIsComposingName(true)}
             onFocus={focusNameInput}
             onChange={(event) => setCustomerText(event.nativeEvent.isComposing || isComposingName ? event.target.value : normalizeCustomerName(event.target.value))}
-            placeholder="MARISSA"
+            placeholder="YANG"
           />
         </label>
         <button className="creator-submit-btn" disabled={busy} type="submit">

@@ -95,7 +95,7 @@ export function AdminPage({ settings, onSettingsSaved, access, onGoCustomer, onL
   const [orderSearch, setOrderSearch] = useState("");
   const [orderStatusFilter, setOrderStatusFilter] = useState("all");
   const [orderTemplateFilter, setOrderTemplateFilter] = useState("all");
-  const [previewSampleName, setPreviewSampleName] = useState("MARISSA WONG");
+  const [previewSampleName, setPreviewSampleName] = useState("YANG WONG");
   const [ticketOverflow, setTicketOverflow] = useState(false);
   const ticketPreviewRef = useRef(null);
   const isSuperAdmin = access?.role === "super_admin";
@@ -103,7 +103,7 @@ export function AdminPage({ settings, onSettingsSaved, access, onGoCustomer, onL
   const orderStats = serverOrderStats;
   const ticketLayout = { ...ticketPrintLayout, ...(form.ticketPrintLayout ?? {}) };
   const ticketSampleOrder = {
-    customer_text: previewSampleName || "MARISSA WONG",
+    customer_text: previewSampleName || "YANG WONG",
     order_no: `${form.prefix ?? "No."}0001`,
     generated_at: new Date().toISOString(),
   };
@@ -609,7 +609,7 @@ export function AdminPage({ settings, onSettingsSaved, access, onGoCustomer, onL
                 : <span className="ticket-preview-hint">改任意参数即时生效</span>}
             </div>
             <label className="field ticket-sample-field"><span>预览姓名（仅用于预览）</span>
-              <input value={previewSampleName} onChange={(e) => setPreviewSampleName(e.target.value)} placeholder="MARISSA WONG" />
+              <input value={previewSampleName} onChange={(e) => setPreviewSampleName(e.target.value)} placeholder="YANG WONG" />
             </label>
             <div className="ticket-control-group">
               <div className="ticket-group-title">尺寸与对齐</div>

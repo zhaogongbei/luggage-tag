@@ -1,0 +1,12 @@
+{
+  "id": "deploy-remote-server-update",
+  "title": "使用远端服务器信息更新线上 luggage-tag 服务",
+  "status": "completed",
+  "complexity": "M",
+  "risk": "medium",
+  "domain": "deployment",
+  "currentPhase": "completed",
+  "nextAction": "清理本地临时文件并归档部署任务",
+  "createdAt": "2026-06-06T14:04:21.2339055+08:00",
+  "branch": "master"
+}

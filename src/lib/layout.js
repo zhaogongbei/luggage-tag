@@ -46,7 +46,7 @@ export function drawTag(canvas, { template, customerText, orderNo, watermarkEnab
     ctx.fillRect(0, 0, width, height);
   }
 
-  const name = normalizeCustomerName(customerText) || "MARISSA";
+  const name = normalizeCustomerName(customerText) || "YANG";
   const centerX = width / 2;
   const ink = template.textColor;
   if (showMeta) {

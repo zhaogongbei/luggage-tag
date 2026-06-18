@@ -623,7 +623,7 @@ input[type="checkbox"] {
 
 .creator-submit-btn {
   align-items: center;
-  background: linear-gradient(135deg, #F8E9DD 0%, #C9977E 50%, #F8E9DD 100%);
+  background: linear-gradient(135deg, #F0C099 0%, #D28D6A 50%, #F0C099 100%);
   border: 0;
   border-radius: 30px;
   box-shadow: 0 22px 52px rgba(226, 196, 175, 0.18);
